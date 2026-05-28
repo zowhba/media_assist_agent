@@ -91,6 +91,7 @@ if [ -d "$VENV_DIR" ]; then
   fi
 fi
 
+VENV_FRESH=""
 if [ ! -d "$VENV_DIR" ]; then
   # 일부 Linux 배포는 venv가 분리 패키지
   if ! "$PYTHON_BIN" -c "import venv" 2>/dev/null; then
@@ -110,17 +111,38 @@ if [ ! -d "$VENV_DIR" ]; then
     echo "   • Ubuntu/Debian:   sudo apt install -y python3-venv python3-pip"
     exit 1
   fi
+  VENV_FRESH=1
 fi
 
 VENV_PY="$VENV_DIR/bin/python"
 VENV_PIP="$VENV_DIR/bin/pip"
 
-# ---------- 3) 의존성 설치 (requirements.txt 변경 시에만) ----------
+# ---------- 3) 의존성 설치 ----------
+# 해시 도구 자동 선택 (sha256sum=Linux, shasum=macOS)
+file_hash() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    # 폴백: 파일 수정시각 기반 (해시 도구가 없으면 거의 항상 재설치)
+    "$VENV_PY" -c "import hashlib,sys; print(hashlib.sha256(open('$1','rb').read()).hexdigest())"
+  fi
+}
+
 REQ_HASH_FILE="$VENV_DIR/.req-hash"
-CURRENT_HASH=$(shasum requirements.txt | awk '{print $1}')
+CURRENT_HASH=$(file_hash requirements.txt)
 STORED_HASH=$(cat "$REQ_HASH_FILE" 2>/dev/null || true)
 
-if [ "$CURRENT_HASH" != "$STORED_HASH" ]; then
+# 핵심 패키지가 실제로 import 가능한지 sanity 체크
+need_install=""
+if [ -n "$VENV_FRESH" ]; then need_install=1; fi
+if [ -z "$CURRENT_HASH" ] || [ "$CURRENT_HASH" != "$STORED_HASH" ]; then need_install=1; fi
+if ! "$VENV_PY" -c "import uvicorn, fastapi, anthropic, httpx, pydantic, dotenv" 2>/dev/null; then
+  need_install=1
+fi
+
+if [ -n "$need_install" ]; then
   echo -e "${C_INFO}📦 의존성 설치/업데이트 중...${C_END}"
   "$VENV_PIP" install --quiet --upgrade pip
   "$VENV_PIP" install --quiet -r requirements.txt
