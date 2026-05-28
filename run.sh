@@ -19,7 +19,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 VENV_DIR=".venv"
-PORT="${PORT:-8765}"
+PORT="${PORT:-443}"
+HOST="${HOST:-0.0.0.0}"
 RELOAD_FLAG=""
 if [ "${1:-}" = "--reload" ]; then
   RELOAD_FLAG="--reload"
@@ -173,9 +174,46 @@ if grep -qE '(your-jira-pat-here|sk-ant-api03-\.\.\.)' .env; then
   exit 1
 fi
 
-# ---------- 5) 서버 기동 ----------
-echo
-echo -e "${C_OK}🚀 서버 시작:${C_END} http://127.0.0.1:$PORT"
+# ---------- 5) 1024 미만 포트 권한 처리 ----------
+need_priv=""
+if [ "$PORT" -lt 1024 ] 2>/dev/null && [ "$(id -u)" != "0" ]; then
+  need_priv=1
+fi
+
+if [ -n "$need_priv" ]; then
+  OS=$(uname -s)
+  if [ "$OS" = "Linux" ] && command -v setcap >/dev/null 2>&1; then
+    REAL_PY=$(readlink -f "$VENV_PY" 2>/dev/null || "$VENV_PY" -c 'import os,sys; print(os.path.realpath(sys.executable))')
+    HAS_CAP=$(getcap "$REAL_PY" 2>/dev/null | grep -c cap_net_bind_service || true)
+    if [ "$HAS_CAP" -eq 0 ]; then
+      echo -e "${C_INFO}🔐 포트 $PORT 바인딩 권한 부여 (1회, sudo 필요):${C_END}"
+      echo "   sudo setcap 'cap_net_bind_service=+ep' $REAL_PY"
+      if ! sudo setcap 'cap_net_bind_service=+ep' "$REAL_PY"; then
+        echo -e "${C_ERR}❌ setcap 실패. 다음 중 하나로 실행하세요:${C_END}"
+        echo "   sudo PORT=$PORT ./run.sh"
+        echo "   또는 다른 포트:  PORT=8765 ./run.sh"
+        exit 1
+      fi
+      echo -e "${C_OK}✓${C_END} 권한 부여 완료"
+    fi
+  else
+    echo -e "${C_ERR}❌ 포트 $PORT은(는) 1024 미만이라 root 권한이 필요합니다.${C_END}"
+    echo "   sudo PORT=$PORT ./run.sh   (또는)   PORT=8765 ./run.sh"
+    exit 1
+  fi
+fi
+
+# ---------- 6) 서버 기동 ----------
+if [ "$PORT" = "443" ]; then
+  echo -e "${C_WARN}⚠️  포트 443은 일반적으로 HTTPS용입니다. 이 서버는 평문 HTTP로 동작합니다.${C_END}"
+  echo "   브라우저에서 반드시 ${C_INFO}http://${C_END}로 접근하세요 (https:// 아님)."
+  echo "   외부 노출 시 nginx 등 리버스 프록시로 TLS를 종단하는 것을 권장합니다."
+  echo
+fi
+
+DISPLAY_HOST="$HOST"
+if [ "$HOST" = "0.0.0.0" ]; then DISPLAY_HOST="<this-server-IP>"; fi
+echo -e "${C_OK}🚀 서버 시작:${C_END} http://${DISPLAY_HOST}:$PORT  (binding ${HOST}:${PORT})"
 echo "   첫 로그인: admin / admin (로그인 직후 비밀번호 변경 권장)"
 echo "   중지: Ctrl+C"
 if [ -n "$RELOAD_FLAG" ]; then
@@ -183,4 +221,4 @@ if [ -n "$RELOAD_FLAG" ]; then
 fi
 echo
 
-exec "$VENV_PY" -m uvicorn app:app --host 127.0.0.1 --port "$PORT" $RELOAD_FLAG
+exec "$VENV_PY" -m uvicorn app:app --host "$HOST" --port "$PORT" $RELOAD_FLAG
