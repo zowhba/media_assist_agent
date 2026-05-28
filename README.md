@@ -9,20 +9,31 @@
 - 관리자 계정으로 다른 사용자 생성 / 비밀번호 초기화
 - 자기 비밀번호 변경 (현재 + 새 비밀번호)
 
-## Setup
+## Quick Start (한 줄 실행)
 
 ```bash
-# 1) Python 3.13 가상환경 (3.14는 일부 의존성 휠이 아직 없음)
+./run.sh
+```
+
+`run.sh`이 알아서 처리합니다:
+- 호환 Python(3.11~3.13) 자동 탐색
+- `.venv` 가상환경 생성 & 의존성 설치 (이미 최신이면 스킵)
+- `.env` 없으면 `.env.example`을 복사하고 토큰 입력을 안내
+- uvicorn으로 서버 기동 → http://127.0.0.1:8765
+
+옵션:
+```bash
+PORT=9000 ./run.sh    # 다른 포트
+./run.sh --reload     # 개발 모드 (코드 변경 자동 반영)
+```
+
+## 수동 Setup (필요한 경우만)
+
+```bash
 /opt/homebrew/bin/python3.13 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-
-# 2) .env 작성 (.env.example 참고)
-cp .env.example .env
-# .env 에서 JIRA_ACCESS_TOKEN, CLAUDE_API_KEY 채우기
-
-# 3) 실행
+cp .env.example .env   # 토큰 채우기
 ./.venv/bin/python app.py
-# http://127.0.0.1:8765
 ```
 
 ## First Login
