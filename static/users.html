@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>사용자 관리 - Jira Issue Agent</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <h1>👥 사용자 관리</h1>
+    <div id="userbar"></div>
+  </header>
+  <main>
+    <div class="card">
+      <h2>새 사용자 생성</h2>
+      <div class="row">
+        <div>
+          <label>사용자명</label>
+          <input type="text" id="new_username" />
+        </div>
+        <div>
+          <label>초기 비밀번호 <span class="hint">4자 이상</span></label>
+          <input type="text" id="new_password" />
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>기본 그룹</label>
+          <select id="new_group"></select>
+        </div>
+        <div>
+          <label>관리자 권한</label>
+          <select id="new_is_admin">
+            <option value="false">아니오</option>
+            <option value="true">예</option>
+          </select>
+        </div>
+      </div>
+      <div class="actions">
+        <button id="create_btn">생성</button>
+      </div>
+      <div id="createStatus"></div>
+    </div>
+
+    <div class="card">
+      <h2>사용자 목록</h2>
+      <div id="user_list"></div>
+    </div>
+  </main>
+  <script src="/static/auth.js"></script>
+  <script>loadUserBar();</script>
+  <script src="/static/users.js"></script>
+</body>
+</html>

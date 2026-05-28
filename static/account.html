@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>비밀번호 변경 - Jira Issue Agent</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <h1>🔑 비밀번호 변경</h1>
+    <div id="userbar"></div>
+  </header>
+  <main style="max-width:480px;">
+    <div class="card">
+      <label>현재 비밀번호</label>
+      <input type="password" id="current" autocomplete="current-password" />
+      <label>새 비밀번호 <span class="hint">(4자 이상)</span></label>
+      <input type="password" id="new1" autocomplete="new-password" />
+      <label>새 비밀번호 확인</label>
+      <input type="password" id="new2" autocomplete="new-password" />
+      <div class="actions">
+        <button id="save">변경</button>
+        <a href="/"><button class="secondary" type="button">취소</button></a>
+      </div>
+      <div id="status"></div>
+    </div>
+  </main>
+  <script src="/static/auth.js"></script>
+  <script>loadUserBar();</script>
+  <script src="/static/account.js"></script>
+</body>
+</html>

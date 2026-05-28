@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>설정 - Jira Issue Agent</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <h1>⚙️ 설정</h1>
+    <div id="userbar"></div>
+  </header>
+
+  <main>
+    <div class="card">
+      <h2>설정 그룹</h2>
+      <p class="muted">여러 사용자가 같은 설정 그룹을 공유할 수 있습니다. 그룹을 선택하면 그 그룹의 내용을 보고 편집합니다. "내 기본 그룹으로 지정"을 누르면 분석/등록 시 그 그룹이 사용됩니다.</p>
+      <div class="row">
+        <div>
+          <label>그룹 선택</label>
+          <select id="group_select"></select>
+        </div>
+        <div>
+          <label>&nbsp;</label>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button id="set_default" type="button" class="secondary">내 기본 그룹으로 지정</button>
+            <button id="new_group" type="button" class="secondary">새 그룹</button>
+            <button id="delete_group" type="button" class="danger" style="display:none;">현재 그룹 삭제</button>
+          </div>
+        </div>
+      </div>
+      <div id="groupStatus"></div>
+    </div>
+
+    <div class="card">
+      <h2>Jira 연결</h2>
+      <label>Jira Base URL <span class="hint">예: https://jira.mycompany.com</span></label>
+      <input type="url" id="jira_base_url" placeholder="https://jira.example.com" />
+
+      <div class="row">
+        <div>
+          <label>프로젝트 키 <span class="hint">예: PROJ</span></label>
+          <input type="text" id="project_key" placeholder="PROJ" />
+        </div>
+        <div>
+          <label>이슈 유형 <span class="hint">예: 작업, Task, 버그</span></label>
+          <input type="text" id="issue_type" placeholder="작업" />
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>제목(요약)</h2>
+      <label>요약 prefix <span class="hint">예: [EDMP]</span></label>
+      <input type="text" id="summary_prefix" placeholder="[EDMP]" />
+      <p class="muted">최종 제목 = <span class="kbd">prefix</span> + <span class="kbd">(M/D)</span> + <span class="kbd">AI가 정리한 제목</span>  →  예시: <span class="kbd">[EDMP] (5/28) admin 계정 잠금해제</span></p>
+    </div>
+
+    <div class="card">
+      <h2>담당/보고</h2>
+      <div class="row">
+        <div>
+          <label>보고자 username <span class="hint">Jira 계정의 username</span></label>
+          <input type="text" id="reporter" />
+        </div>
+        <div>
+          <label>담당자 username</label>
+          <input type="text" id="assignee" />
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>회사 / 시스템 (필수, ID 기반 cascading select)</h2>
+      <p class="muted">값을 ID로 보내야 하는 필수 커스텀 필드. 시스템은 이름으로 선택하면 자동으로 ID가 저장됨</p>
+      <label>커스텀 필드 ID <span class="hint">기본값: customfield_11102</span></label>
+      <input type="text" id="company_field_id" placeholder="customfield_11102" />
+      <div class="row">
+        <div>
+          <label>부모 ID (회사) <span class="hint">기본값: 11327 (SK C&amp;C)</span></label>
+          <input type="text" id="company_parent_id" placeholder="11327" />
+        </div>
+        <div>
+          <label>시스템</label>
+          <select id="company_child_id">
+            <option value="11331">NCMS (11331)</option>
+            <option value="11332">ACS (11332)</option>
+            <option value="13401">EDMP (13401)</option>
+            <option value="13402">EUXP (13402)</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>업무 구분 (2-depth, 커스텀 필드)</h2>
+      <label>커스텀 필드 ID <span class="hint">예: customfield_10100 — Jira 관리자 화면에서 확인</span></label>
+      <input type="text" id="category_field_id" placeholder="customfield_10100" />
+      <div class="row">
+        <div>
+          <label>부모 값</label>
+          <input type="text" id="category_parent" placeholder="운영" />
+        </div>
+        <div>
+          <label>자식 값</label>
+          <input type="text" id="category_child" placeholder="장애대응" />
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>수정 버전 / 우선순위</h2>
+      <div class="row">
+        <div>
+          <label>수정 버전 <span class="hint">비워두면 매월 오늘 날짜 기준 "YY.MM" 형식 자동 생성 (예: 26.05)</span></label>
+          <input type="text" id="fix_version" placeholder="(비워두면 자동)" />
+        </div>
+        <div>
+          <label>우선순위 옵션 <span class="hint">쉼표로 구분. AI가 이 중 하나를 선택</span></label>
+          <input type="text" id="priority_options" placeholder="Highest, High, Medium, Low, Lowest" />
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>레이블</h2>
+      <label>고정 레이블 <span class="hint">쉼표로 구분. 모든 이슈에 항상 붙음</span></label>
+      <input type="text" id="fixed_labels" placeholder="운영지원" />
+      <label>동적 레이블 풀 <span class="hint">쉼표로 구분. AI가 대화 내용에 맞게 골라 붙임</span></label>
+      <input type="text" id="dynamic_label_pool" placeholder="상용작업, 장애대응, 개선, 문의" />
+    </div>
+
+    <div class="card">
+      <h2>Claude</h2>
+      <label>모델</label>
+      <input type="text" id="claude_model" placeholder="claude-sonnet-4-6" />
+    </div>
+
+    <div class="actions">
+      <button id="save">💾 현재 그룹 저장</button>
+      <a href="/"><button class="secondary" type="button">← 메인으로</button></a>
+    </div>
+    <div id="saveStatus"></div>
+  </main>
+
+  <script src="/static/auth.js"></script>
+  <script>loadUserBar();</script>
+  <script src="/static/settings.js"></script>
+</body>
+</html>

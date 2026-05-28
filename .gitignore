@@ -1,0 +1,32 @@
+# Secrets / credentials
+.env
+.env.txt
+.env.local
+*.pem
+
+# Per-instance data (passwords, settings, sessions)
+users.json
+groups/
+settings.json
+settings.json.bak
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.python-version
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Claude Code
+.claude/
+
+# Logs
+*.log
+/tmp/
