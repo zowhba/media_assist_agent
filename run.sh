@@ -27,31 +27,61 @@ fi
 
 C_OK="\033[32m"; C_WARN="\033[33m"; C_ERR="\033[31m"; C_INFO="\033[36m"; C_END="\033[0m"
 
-# ---------- 1) Python 찾기 ----------
+# ---------- 1) Python 찾기 (3.9 ~ 3.13 지원, 3.14는 pydantic 휠 미지원) ----------
+MIN_MAJOR=3; MIN_MINOR=9
+MAX_MAJOR=3; MAX_MINOR=13
+
+check_py() {
+  "$1" -c "
+import sys
+v = sys.version_info[:2]
+lo = (${MIN_MAJOR}, ${MIN_MINOR}); hi = (${MAX_MAJOR}, ${MAX_MINOR})
+sys.exit(0 if lo <= v <= hi else 1)
+" 2>/dev/null
+}
+
 PYTHON_BIN=""
-for c in \
-  /opt/homebrew/bin/python3.13 \
-  /opt/homebrew/bin/python3.12 \
-  /opt/homebrew/bin/python3.11 \
-  /usr/local/bin/python3.13 \
-  /usr/local/bin/python3.12 \
-  /usr/local/bin/python3.11 \
-  python3.13 python3.12 python3.11 python3
-do
+CANDIDATES=""
+# 1) 명시적 버전부터 우선 검색
+for ver in 3.13 3.12 3.11 3.10 3.9; do
+  for prefix in /opt/homebrew/bin /usr/local/bin /usr/bin /usr/local/python/bin; do
+    CANDIDATES="$CANDIDATES $prefix/python$ver"
+  done
+  CANDIDATES="$CANDIDATES python$ver"
+done
+# 2) 마지막으로 일반명
+CANDIDATES="$CANDIDATES python3 python"
+
+# 발견된 모든 후보 출력 (디버깅에 유용)
+FOUND_ANY=""
+for c in $CANDIDATES; do
   if command -v "$c" >/dev/null 2>&1; then
-    if "$c" -c 'import sys; sys.exit(0 if (3,11) <= sys.version_info[:2] <= (3,13) else 1)' 2>/dev/null; then
+    real=$(command -v "$c")
+    ver=$("$c" --version 2>&1 || echo "unknown")
+    FOUND_ANY="$FOUND_ANY\n  $real  →  $ver"
+    if [ -z "$PYTHON_BIN" ] && check_py "$c"; then
       PYTHON_BIN="$c"
-      break
     fi
   fi
 done
 
 if [ -z "$PYTHON_BIN" ]; then
-  echo -e "${C_ERR}❌ Python 3.11 ~ 3.13이 필요합니다 (3.14는 일부 의존성 휠 미지원).${C_END}"
-  echo "   설치 예: brew install python@3.13"
+  echo -e "${C_ERR}❌ Python 3.9 ~ 3.13이 필요합니다.${C_END}"
+  if [ -n "$FOUND_ANY" ]; then
+    echo -e "${C_INFO}시스템에서 발견된 Python:${C_END}$FOUND_ANY"
+  else
+    echo "   시스템에서 Python을 찾지 못했습니다."
+  fi
+  echo
+  echo "설치 방법:"
+  echo "  • Amazon Linux 2023:  sudo dnf install -y python3.11 python3.11-pip"
+  echo "  • Amazon Linux 2:     sudo amazon-linux-extras install python3.11"
+  echo "  • Ubuntu/Debian:      sudo apt install -y python3.11 python3.11-venv"
+  echo "  • macOS:              brew install python@3.13"
+  echo "  • RHEL/CentOS:        sudo dnf install -y python3.11"
   exit 1
 fi
-echo -e "${C_OK}✓${C_END} Python: $("$PYTHON_BIN" --version) ($PYTHON_BIN)"
+echo -e "${C_OK}✓${C_END} Python: $("$PYTHON_BIN" --version) ($(command -v "$PYTHON_BIN"))"
 
 # ---------- 2) venv 점검/생성 ----------
 if [ -d "$VENV_DIR" ]; then
@@ -62,8 +92,24 @@ if [ -d "$VENV_DIR" ]; then
 fi
 
 if [ ! -d "$VENV_DIR" ]; then
+  # 일부 Linux 배포는 venv가 분리 패키지
+  if ! "$PYTHON_BIN" -c "import venv" 2>/dev/null; then
+    PYVER=$("$PYTHON_BIN" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+    echo -e "${C_ERR}❌ Python의 venv 모듈이 없습니다.${C_END}"
+    echo "   • Ubuntu/Debian:   sudo apt install -y python${PYVER}-venv"
+    echo "   • Amazon Linux:    sudo dnf install -y python${PYVER//./}-libs"
+    echo "   • RHEL/CentOS:     sudo dnf install -y python${PYVER//./}-libs"
+    exit 1
+  fi
   echo -e "${C_INFO}📦 가상환경 생성: $VENV_DIR${C_END}"
-  "$PYTHON_BIN" -m venv "$VENV_DIR"
+  if ! "$PYTHON_BIN" -m venv "$VENV_DIR" 2>/tmp/venv_err; then
+    echo -e "${C_ERR}❌ 가상환경 생성 실패:${C_END}"
+    cat /tmp/venv_err
+    echo
+    echo "   ensurepip 누락 시:"
+    echo "   • Ubuntu/Debian:   sudo apt install -y python3-venv python3-pip"
+    exit 1
+  fi
 fi
 
 VENV_PY="$VENV_DIR/bin/python"
