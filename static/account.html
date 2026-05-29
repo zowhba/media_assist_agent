@@ -2,14 +2,11 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8" />
-  <title>비밀번호 변경 - Jira Issue Agent</title>
+  <title>비밀번호 변경 - MAP</title>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
-  <header>
-    <h1>🔑 비밀번호 변경</h1>
-    <div id="userbar"></div>
-  </header>
+  <div id="app-shell"></div>
   <main style="max-width:480px;">
     <div class="card">
       <label>현재 비밀번호</label>
@@ -26,7 +23,7 @@
     </div>
   </main>
   <script src="/static/auth.js"></script>
-  <script>loadUserBar();</script>
+  <script>renderShell({ context: { icon: "🔑", title: "비밀번호 변경" } });</script>
   <script src="/static/account.js"></script>
 </body>
 </html>

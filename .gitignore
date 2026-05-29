@@ -9,6 +9,7 @@ users.json
 groups/
 settings.json
 settings.json.bak
+group_template.json
 
 # Python
 __pycache__/

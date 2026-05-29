@@ -6,10 +6,7 @@
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
-  <header>
-    <h1>🪄 Jira Issue Agent</h1>
-    <div id="userbar"></div>
-  </header>
+  <div id="app-shell"></div>
 
   <main>
     <div class="card">
@@ -31,7 +28,16 @@
   </main>
 
   <script src="/static/auth.js"></script>
-  <script>loadUserBar();</script>
+  <script>
+    renderShell({
+      context: {
+        icon: "🪄",
+        title: "Jira 이슈 자동 등록",
+        showGroup: true,
+        actions: [{ label: "⚙️ 설정", href: "/settings" }],
+      },
+    });
+  </script>
   <script src="/static/app.js"></script>
 </body>
 </html>

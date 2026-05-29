@@ -1,8 +1,23 @@
-// Shared header: shows current user, default group, links, logout.
-// Pages opt in by including <div id="userbar"></div> in the header and
-// loading this script. If /api/me returns 401, redirects to /login.
+// Shared portal shell renderer.
+//
+// Every page includes <div id="app-shell"></div> at the top of <body> and
+// calls renderShell(opts). It builds a persistent two-row header:
+//   1) Top bar (always): 🎬 MAP brand + account nav (password / users / logout)
+//   2) Sub bar (only when opts.context given): the current tool's title and
+//      its tool-specific actions (settings link, group badge, ...).
+//
+// If /api/me returns 401, redirects to /login.
+//
+// opts = {
+//   context: {
+//     icon: "🪄",
+//     title: "Jira 이슈 자동 등록",
+//     showGroup: true,                       // show "그룹: XXX" badge
+//     actions: [{ label: "⚙️ 설정", href: "/settings" }],
+//   }
+// }
 
-async function loadUserBar() {
+async function renderShell(opts = {}) {
   let me;
   try {
     const r = await fetch("/api/me", { cache: "no-store" });
@@ -16,60 +31,93 @@ async function loadUserBar() {
     console.error("auth load failed:", e);
     return null;
   }
-
   window.__me = me;
-  const bar = document.getElementById("userbar");
-  if (!bar) return me;
 
-  bar.style.cssText =
-    "display:flex; align-items:center; gap:14px; font-size:13px;";
-  bar.innerHTML = "";
+  const shell = document.getElementById("app-shell");
+  if (!shell) return me;
+  shell.innerHTML = "";
 
-  const userInfo = document.createElement("span");
-  userInfo.innerHTML = `<b>${me.username}</b>${me.is_admin ? ' <span style="background:#fff8c5;color:#7d4e00;padding:1px 6px;border-radius:8px;font-size:11px;">admin</span>' : ""}`;
-  bar.appendChild(userInfo);
+  // ---------- top bar (persistent) ----------
+  const top = document.createElement("header");
+  top.className = "topbar";
 
-  const groupBadge = document.createElement("span");
-  groupBadge.textContent = `그룹: ${me.default_group}`;
-  groupBadge.style.cssText = "opacity:0.85;";
-  bar.appendChild(groupBadge);
+  const brand = document.createElement("a");
+  brand.className = "brand";
+  brand.href = "/";
+  brand.innerHTML = '🎬 MAP <span class="brand-sub">Media Automation Portal</span>';
+  top.appendChild(brand);
 
-  const sep = (h) => {
+  const account = document.createElement("div");
+  account.className = "account";
+
+  const userSpan = document.createElement("span");
+  userSpan.className = "acct-user";
+  userSpan.innerHTML =
+    `${me.username}` +
+    (me.is_admin ? ' <span class="acct-admin">admin</span>' : "");
+  account.appendChild(userSpan);
+
+  const mkLink = (label, href, onclick) => {
     const a = document.createElement("a");
-    a.href = h;
-    a.style.color = "#fff";
-    a.style.opacity = "0.9";
+    a.textContent = label;
+    a.href = href || "#";
+    if (onclick) a.addEventListener("click", onclick);
     return a;
   };
 
-  const homeA = sep("/");
-  homeA.textContent = "메인";
-  const settA = sep("/settings");
-  settA.textContent = "설정";
-  const accA = sep("/account");
-  accA.textContent = "비밀번호";
-  bar.appendChild(homeA);
-  bar.appendChild(settA);
-  bar.appendChild(accA);
+  account.appendChild(mkLink("비밀번호", "/account"));
+  if (me.is_admin) account.appendChild(mkLink("사용자관리", "/users"));
+  account.appendChild(
+    mkLink("로그아웃", null, async (e) => {
+      e.preventDefault();
+      await fetch("/api/logout", { method: "POST" });
+      window.location.href = "/login";
+    })
+  );
+  top.appendChild(account);
+  shell.appendChild(top);
 
-  if (me.is_admin) {
-    const usersA = sep("/users");
-    usersA.textContent = "사용자관리";
-    bar.appendChild(usersA);
+  // ---------- sub bar (per-tool, optional) ----------
+  const ctx = opts.context;
+  if (ctx) {
+    const sub = document.createElement("div");
+    sub.className = "subbar";
+
+    const back = document.createElement("a");
+    back.className = "ctx-back";
+    back.href = "/";
+    back.textContent = "←";
+    back.title = "포털 홈";
+    sub.appendChild(back);
+
+    const title = document.createElement("div");
+    title.className = "ctx-title";
+    title.innerHTML = `${ctx.icon ? ctx.icon + " " : ""}${ctx.title || ""}`;
+    sub.appendChild(title);
+
+    const actions = document.createElement("div");
+    actions.className = "ctx-actions";
+
+    if (ctx.showGroup) {
+      const g = document.createElement("span");
+      g.className = "ctx-group";
+      g.textContent = `그룹: ${me.default_group}`;
+      g.title = "이 도구가 사용하는 설정 그룹";
+      actions.appendChild(g);
+    }
+    for (const act of ctx.actions || []) {
+      const a = document.createElement("a");
+      a.href = act.href;
+      a.textContent = act.label;
+      actions.appendChild(a);
+    }
+    sub.appendChild(actions);
+    shell.appendChild(sub);
   }
-
-  const out = document.createElement("a");
-  out.href = "#";
-  out.textContent = "로그아웃";
-  out.style.cssText = "color:#fff; opacity:0.9; cursor:pointer;";
-  out.addEventListener("click", async (e) => {
-    e.preventDefault();
-    await fetch("/api/logout", { method: "POST" });
-    window.location.href = "/login";
-  });
-  bar.appendChild(out);
 
   return me;
 }
 
-window.loadUserBar = loadUserBar;
+window.renderShell = renderShell;
+// backward compatibility (older inline calls)
+window.loadUserBar = () => renderShell();

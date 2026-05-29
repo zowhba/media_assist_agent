@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Jira Issue Agent — 한 번에 실행 스크립트
+# MAP — Media Automation Portal — 한 번에 실행 스크립트
 #
 # 동작:
 #   1) 호환 Python(3.11~3.13) 자동 탐색
@@ -139,7 +139,7 @@ STORED_HASH=$(cat "$REQ_HASH_FILE" 2>/dev/null || true)
 need_install=""
 if [ -n "$VENV_FRESH" ]; then need_install=1; fi
 if [ -z "$CURRENT_HASH" ] || [ "$CURRENT_HASH" != "$STORED_HASH" ]; then need_install=1; fi
-if ! "$VENV_PY" -c "import uvicorn, fastapi, anthropic, httpx, pydantic, dotenv" 2>/dev/null; then
+if ! "$VENV_PY" -c "import uvicorn, fastapi, anthropic, httpx, pydantic, dotenv, psycopg, psycopg_pool" 2>/dev/null; then
   need_install=1
 fi
 
@@ -171,6 +171,13 @@ fi
 # placeholder 그대로면 경고
 if grep -qE '(your-jira-pat-here|sk-ant-api03-\.\.\.)' .env; then
   echo -e "${C_WARN}⚠️  .env의 토큰이 예시값 그대로입니다. 실제 값으로 바꾼 뒤 다시 실행하세요.${C_END}"
+  exit 1
+fi
+
+# DB 설정 확인
+if ! grep -qE '^APP_DB_URL=.+' .env; then
+  echo -e "${C_ERR}❌ .env에 APP_DB_URL(PostgreSQL 접속 문자열)이 없습니다.${C_END}"
+  echo "   예: APP_DB_URL=postgresql://user:pass@host/dbname?sslmode=require"
   exit 1
 fi
 

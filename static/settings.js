@@ -145,17 +145,22 @@ async function createNewGroup() {
   const status = document.getElementById("groupStatus");
   setStatus(status, "info", `"${name}" 그룹 생성 중...`);
   try {
+    // 새 그룹은 템플릿(group_template.json) 값으로 미리 채움
+    let template = {};
+    const tplRes = await fetch("/api/group-template", { cache: "no-store" });
+    if (tplRes.ok) template = await tplRes.json();
+
     const r = await fetch(`/api/settings-groups/${encodeURIComponent(name)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
+      body: JSON.stringify(template),
     });
     if (!r.ok) throw new Error(await r.text());
     currentGroup = name;
     await loadGroupList();
     document.getElementById("group_select").value = name;
     await loadGroupData(name);
-    setStatus(status, "success", `✓ 새 그룹 "${name}" 생성됨. 값 입력 후 저장하세요.`);
+    setStatus(status, "success", `✓ 새 그룹 "${name}" 생성됨 (템플릿 값으로 채워짐). 필요한 부분만 수정 후 저장하세요.`);
   } catch (e) {
     setStatus(status, "error", "생성 실패: " + e.message);
   }

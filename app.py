@@ -19,6 +19,8 @@ from dotenv import load_dotenv
 import httpx
 import anthropic
 
+import db
+
 # --- logging ---
 logging.basicConfig(
     level=logging.INFO,
@@ -53,9 +55,9 @@ load_dotenv(BASE_DIR / ".env")
 JIRA_TOKEN = os.getenv("JIRA_ACCESS_TOKEN", "")
 CLAUDE_KEY = os.getenv("CLAUDE_API_KEY", "")
 
+# Legacy file paths — only used to import existing data into the DB once.
 USERS_PATH = BASE_DIR / "users.json"
 GROUPS_DIR = BASE_DIR / "groups"
-GROUPS_DIR.mkdir(exist_ok=True)
 LEGACY_SETTINGS = BASE_DIR / "settings.json"
 
 # In-memory session store: {token: {"username": str, "expires_at": datetime}}
@@ -80,67 +82,83 @@ def verify_password(password: str, password_hash: str, salt: str) -> bool:
     return secrets.compare_digest(h, password_hash)
 
 
-def load_users() -> dict:
-    if USERS_PATH.exists():
-        return json.loads(USERS_PATH.read_text(encoding="utf-8"))
-    return {"users": {}}
+# Storage is backed by PostgreSQL (db.py). These names are re-exported so the
+# rest of the app keeps calling them unchanged.
+load_users = db.load_users
+save_users = db.save_users
+list_groups = db.list_groups
+load_group = db.load_group
+save_group = db.save_group
+delete_group = db.delete_group
+load_group_template = db.load_group_template
+save_group_template = db.save_group_template
+
+GROUP_TEMPLATE_PATH = BASE_DIR / "group_template.json"
 
 
-def save_users(data: dict) -> None:
-    USERS_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+def _read_json_file(path: Path) -> Optional[dict]:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        log.warning("파일 읽기 실패 %s: %s", path, e)
+        return None
 
 
-def ensure_admin_user():
-    users = load_users()
-    if not users.get("users"):
-        pw_hash, salt = hash_password("admin")
-        users["users"] = {
-            "admin": {
-                "password_hash": pw_hash,
-                "salt": salt,
-                "is_admin": True,
-                "default_group": "default",
-            }
-        }
-        save_users(users)
-        log.warning("Bootstrap admin user created: admin / admin  -- 비밀번호를 즉시 변경하세요.")
+def bootstrap_data():
+    """DB 스키마 생성 + 최초 1회 파일 데이터 이관 + admin 계정 보장."""
+    db.init_schema()
 
+    # 1) 설정 그룹: DB가 비어 있으면 groups/*.json 이관
+    if not db.list_groups():
+        imported = 0
+        if GROUPS_DIR.exists():
+            for p in sorted(GROUPS_DIR.glob("*.json")):
+                data = _read_json_file(p)
+                if data is not None:
+                    db.save_group(p.stem, data)
+                    imported += 1
+        # 레거시 settings.json도 default로 흡수
+        if LEGACY_SETTINGS.exists() and not db.group_exists("default"):
+            data = _read_json_file(LEGACY_SETTINGS)
+            if data is not None:
+                db.save_group("default", data)
+        if not db.group_exists("default"):
+            db.save_group("default", {})
+        if imported:
+            log.info("Imported %d settings group(s) from files into DB.", imported)
 
-# ---------- groups ----------
+    # 2) 그룹 템플릿: DB에 없으면 파일에서, 그것도 없으면 default 그룹 값으로 시드
+    if not db.load_group_template():
+        tpl = None
+        if GROUP_TEMPLATE_PATH.exists():
+            tpl = _read_json_file(GROUP_TEMPLATE_PATH)
+        if not tpl:
+            default_data = db.load_group("default")
+            if default_data:
+                tpl = default_data
+        if tpl:
+            db.save_group_template(tpl)
+            log.info("Seeded group template into DB.")
 
-def list_groups() -> List[str]:
-    return sorted([p.stem for p in GROUPS_DIR.glob("*.json")])
-
-
-def load_group(name: str) -> dict:
-    p = GROUPS_DIR / f"{name}.json"
-    if p.exists():
-        return json.loads(p.read_text(encoding="utf-8"))
-    return {}
-
-
-def save_group(name: str, data: dict) -> None:
-    p = GROUPS_DIR / f"{name}.json"
-    p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def delete_group_file(name: str) -> None:
-    p = GROUPS_DIR / f"{name}.json"
-    if p.exists():
-        p.unlink()
-
-
-def migrate_legacy_settings():
-    """Move legacy settings.json into groups/default.json on first run."""
-    target = GROUPS_DIR / "default.json"
-    if LEGACY_SETTINGS.exists() and not target.exists():
-        data = json.loads(LEGACY_SETTINGS.read_text(encoding="utf-8"))
-        save_group("default", data)
-        LEGACY_SETTINGS.rename(LEGACY_SETTINGS.with_suffix(".json.bak"))
-        log.info("Migrated legacy settings.json -> groups/default.json")
-    if not target.exists():
-        save_group("default", {})
-        log.info("Created empty groups/default.json")
+    # 3) 사용자: DB가 비어 있으면 users.json 이관, 없으면 admin/admin 생성
+    if not db.load_users()["users"]:
+        data = _read_json_file(USERS_PATH) if USERS_PATH.exists() else None
+        if data and data.get("users"):
+            db.save_users(data)
+            log.info("Imported %d user(s) from users.json into DB.", len(data["users"]))
+        else:
+            pw_hash, salt = hash_password("admin")
+            db.save_users({
+                "users": {
+                    "admin": {
+                        "password_hash": pw_hash,
+                        "salt": salt,
+                        "is_admin": True,
+                        "default_group": "default",
+                    }
+                }
+            })
+            log.warning("Bootstrap admin user created: admin / admin -- 비밀번호를 즉시 변경하세요.")
 
 
 # ---------- sessions ----------
@@ -178,16 +196,17 @@ def require_admin(request: Request) -> dict:
 
 # ---------- app ----------
 
-app = FastAPI(title="Jira Issue Agent")
+app = FastAPI(title="MAP — Media Automation Portal")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 
 @app.middleware("http")
 async def no_cache_middleware(request: Request, call_next):
     response: Response = await call_next(request)
+    p = request.url.path
     if (
-        request.url.path.startswith(("/static", "/api/"))
-        or request.url.path in ("/", "/settings", "/login", "/account", "/users")
+        p.startswith(("/static", "/api/", "/tools"))
+        or p in ("/", "/settings", "/login", "/account", "/users")
     ):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
@@ -197,8 +216,13 @@ async def no_cache_middleware(request: Request, call_next):
 
 @app.on_event("startup")
 async def _startup():
-    migrate_legacy_settings()
-    ensure_admin_user()
+    bootstrap_data()
+
+
+@app.on_event("shutdown")
+async def _shutdown():
+    if db._pool is not None:
+        db._pool.close()
 
 
 claude = anthropic.Anthropic(api_key=CLAUDE_KEY) if CLAUDE_KEY else None
@@ -216,7 +240,14 @@ async def login_page():
 
 
 @app.get("/")
-async def index_page(request: Request):
+async def portal_page(request: Request):
+    if not get_current_user(request):
+        return RedirectResponse("/login")
+    return _serve("portal.html")
+
+
+@app.get("/tools/jira")
+async def jira_tool_page(request: Request):
     if not get_current_user(request):
         return RedirectResponse("/login")
     return _serve("index.html")
@@ -337,6 +368,12 @@ async def api_set_default_group(body: DefaultGroupIn, request: Request):
 
 # ---------- settings groups API ----------
 
+@app.get("/api/group-template")
+async def api_group_template(request: Request):
+    require_user(request)
+    return load_group_template()
+
+
 @app.get("/api/settings-groups")
 async def api_list_groups(request: Request):
     require_user(request)
@@ -370,7 +407,7 @@ async def api_delete_group(name: str, request: Request):
         raise HTTPException(400, "'default' 그룹은 삭제할 수 없습니다.")
     if name not in list_groups():
         raise HTTPException(404, f"그룹 없음: {name}")
-    delete_group_file(name)
+    delete_group(name)
     # users referencing this group fall back to default
     users = load_users()
     for u_info in users["users"].values():

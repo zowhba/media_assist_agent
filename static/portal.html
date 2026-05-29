@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>MAP — Media Automation Portal</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div id="app-shell"></div>
+
+  <main>
+    <div class="portal-intro">
+      <h2 id="greeting">업무 자동화 도구</h2>
+      <p class="muted">반복 업무를 자동화하는 도구 모음입니다. 사용할 도구를 선택하세요.</p>
+    </div>
+
+    <div class="tool-grid" id="toolGrid"></div>
+  </main>
+
+  <script src="/static/auth.js"></script>
+  <script>renderShell();</script>
+  <script src="/static/portal.js"></script>
+</body>
+</html>
