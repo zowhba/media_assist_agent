@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import time
 import base64
@@ -20,6 +21,7 @@ import httpx
 import anthropic
 
 import db
+import monthly
 
 # --- logging ---
 logging.basicConfig(
@@ -251,6 +253,20 @@ async def jira_tool_page(request: Request):
     if not get_current_user(request):
         return RedirectResponse("/login")
     return _serve("index.html")
+
+
+@app.get("/tools/weekly")
+async def weekly_tool_page(request: Request):
+    if not get_current_user(request):
+        return RedirectResponse("/login")
+    return _serve("weekly.html")
+
+
+@app.get("/tools/monthly")
+async def monthly_tool_page(request: Request):
+    if not get_current_user(request):
+        return RedirectResponse("/login")
+    return _serve("monthly.html")
 
 
 @app.get("/settings")
@@ -531,6 +547,48 @@ def _strip_code_fence(text: str) -> str:
     return t.strip()
 
 
+def _parse_memo_date(value) -> Optional[str]:
+    """AI가 추출한 날짜 문자열을 'M/D'로 변환. 없거나 형식이 이상하면 None."""
+    if not value or not isinstance(value, str):
+        return None
+    s = value.strip()
+    if not s:
+        return None
+    month = day = None
+    # YYYY-MM-DD 또는 YYYY.MM.DD / YYYY/MM/DD
+    m = re.match(r"^\d{4}[-./](\d{1,2})[-./](\d{1,2})$", s)
+    if m:
+        month, day = int(m.group(1)), int(m.group(2))
+    else:
+        # M/D, MM/DD, M.D (앞에 연도 없는 형태, 뒤 연도 옵션)
+        m = re.match(r"^(\d{1,2})[-./](\d{1,2})(?:[-./]\d{2,4})?$", s)
+        if m:
+            month, day = int(m.group(1)), int(m.group(2))
+    if month is None or day is None:
+        return None
+    if not (1 <= month <= 12 and 1 <= day <= 31):
+        return None
+    return f"{month}/{day}"
+
+
+def _fix_version_for(summary: str, now: datetime) -> str:
+    """제목의 (M/D)를 기준으로 수정 버전 'YY.MM' 생성.
+
+    처리 날짜는 보통 과거/현재이므로, 제목의 월이 현재 월보다 크면
+    (예: 지금 1월인데 제목이 12월) 작년으로 간주해 연도를 내린다.
+    제목에서 날짜를 못 찾으면 오늘 기준으로 폴백.
+    """
+    m = re.search(r"\((\d{1,2})/(\d{1,2})\)", summary or "")
+    if m:
+        month = int(m.group(1))
+        if 1 <= month <= 12:
+            year = now.year
+            if month > now.month:
+                year -= 1
+            return f"{year % 100:02d}.{month:02d}"
+    return f"{now.year % 100:02d}.{now.month:02d}"
+
+
 def _user_group_settings(request: Request) -> tuple[dict, dict]:
     user = require_user(request)
     group = user.get("default_group", "default")
@@ -553,7 +611,11 @@ async def analyze(
         "priority_options", ["Highest", "High", "Medium", "Low", "Lowest"]
     )
 
+    today = datetime.now()
+    today_iso = today.strftime("%Y-%m-%d")
     system_prompt = f"""당신은 Jira 이슈 추출 도우미입니다. 사용자가 붙여넣은 대화/이미지를 읽고, 하나 이상의 Jira 이슈로 정리해 주세요.
+
+오늘 날짜는 {today_iso} 입니다.
 
 반드시 아래 형식의 **JSON 배열만** 출력하세요 (마크다운 코드 펜스나 다른 텍스트 금지):
 [
@@ -561,6 +623,7 @@ async def analyze(
     "summary": "이슈 제목 (한글, 50자 이내, 날짜/접두어는 절대 포함하지 말 것 — 시스템이 자동으로 붙입니다)",
     "description": "일반 텍스트 본문. 마크업이나 마크다운 절대 금지. 아래 'description 작성 규칙' 참고.",
     "priority": "다음 중 하나: {', '.join(priority_options)}",
+    "date": "이 업무와 관련해 메모/대화에 명시된 날짜를 YYYY-MM-DD로. 없으면 빈 문자열.",
     "dynamic_labels": ["아래 풀에서 0~N개 선택: {', '.join(dynamic_label_pool) if dynamic_label_pool else '(풀 비어있음)'}"]
   }}
 ]
@@ -575,6 +638,13 @@ description 작성 규칙 (매우 중요):
 - 각 섹션 아래 항목은 가운뎃점("· ") 또는 하이픈("- ") 으로 시작하는 한 줄짜리 불릿으로 작성합니다.
 - 섹션과 섹션 사이에는 빈 줄 1개를 넣으세요.
 - 내용이 없는 섹션은 아예 출력하지 마세요.
+
+date(날짜) 규칙:
+- 메모/대화에 이 업무와 관련된 날짜가 적혀 있으면 그 날짜를 date에 YYYY-MM-DD로 넣으세요.
+  (예: "5/5", "5월 5일", "2026-05-05", "5.5" → "2026-05-05")
+- "오늘/금일"=오늘 날짜, "어제"=하루 전, "내일"=하루 후 처럼 상대 표현도 오늘({today_iso}) 기준으로 환산하세요.
+- 연도가 안 적혀 있으면 오늘 날짜의 연도를 사용하세요.
+- 날짜가 전혀 없으면 date는 빈 문자열("")로 두세요. 절대 임의로 지어내지 마세요.
 
 기타 규칙:
 - 대화에 서로 다른 작업 요청이 여러 건이면, 배열에 여러 객체로 분리하세요.
@@ -631,11 +701,14 @@ description 작성 규칙 (매우 중요):
         )
 
     today = datetime.now()
-    date_str = f"{today.month}/{today.day}"
+    today_date_str = f"{today.month}/{today.day}"
     prefix = (settings.get("summary_prefix") or "").strip()
 
     for issue in issues:
         ai_summary = (issue.get("summary") or "").strip()
+        # 제목 날짜: 메모에서 추출한 날짜가 있으면 그걸, 없으면 오늘 날짜
+        memo_md = _parse_memo_date(issue.get("date"))
+        date_str = memo_md if memo_md else today_date_str
         parts = []
         if prefix:
             parts.append(prefix)
@@ -643,6 +716,7 @@ description 작성 규칙 (매우 중요):
         if ai_summary:
             parts.append(ai_summary)
         issue["summary"] = " ".join(parts)
+        issue.pop("date", None)
         dyn = issue.get("dynamic_labels", []) or []
         if dynamic_label_pool:
             dyn = [l for l in dyn if l in dynamic_label_pool]
@@ -706,10 +780,11 @@ async def create_issues(req: CreateRequest, request: Request):
                 "labels": issue.labels,
                 "priority": {"name": issue.priority},
             }
+            # 수정 버전: 설정에 고정값이 있으면 그걸, 없으면 제목의 (M/D)
+            # 처리 날짜 기준으로 "YY.MM" 생성 (연도 자동 보정)
             fix_version = (s.get("fix_version") or "").strip()
             if not fix_version:
-                now = datetime.now()
-                fix_version = f"{now.year % 100:02d}.{now.month:02d}"
+                fix_version = _fix_version_for(issue.summary, datetime.now())
             fields["fixVersions"] = [{"name": fix_version}]
 
             if s.get("reporter"):
@@ -812,6 +887,319 @@ async def create_issues(req: CreateRequest, request: Request):
                 })
 
     return {"results": results}
+
+
+# ---------- weekly report ----------
+
+MAX_ASSET_BYTES = 5 * 1024 * 1024  # 개별 이미지 5MB 상한
+
+
+class WeeklyAsset(BaseModel):
+    name: str = ""
+    media_type: str = "image/png"
+    data: str  # base64 (no data: prefix)
+
+
+class WeeklyConfigIn(BaseModel):
+    format_text: str = ""
+    format_assets: List[WeeklyAsset] = []
+    guide_prompt: str = ""
+
+
+@app.get("/api/weekly/config")
+async def api_weekly_get(request: Request):
+    user = require_user(request)
+    return db.load_weekly_config(user["username"])
+
+
+@app.post("/api/weekly/config")
+async def api_weekly_save(body: WeeklyConfigIn, request: Request):
+    user = require_user(request)
+    assets = []
+    for a in body.format_assets:
+        # 대략적인 base64 크기 검증
+        if a.data and (len(a.data) * 3) // 4 > MAX_ASSET_BYTES:
+            raise HTTPException(400, f"이미지가 너무 큽니다(5MB 초과): {a.name or '이미지'}")
+        assets.append({"name": a.name, "media_type": a.media_type, "data": a.data})
+    db.save_weekly_config(user["username"], body.format_text, assets, body.guide_prompt)
+    log.info("[/api/weekly/config] user=%s saved (text=%dchars, assets=%d, guide=%dchars)",
+             user["username"], len(body.format_text or ""), len(assets),
+             len(body.guide_prompt or ""))
+    return {"ok": True, "assets": len(assets)}
+
+
+@app.post("/api/weekly/generate")
+async def api_weekly_generate(
+    request: Request,
+    text: str = Form(""),
+    images: List[UploadFile] = File(default=[]),
+):
+    if claude is None:
+        raise HTTPException(500, "CLAUDE_API_KEY가 .env에 설정되어 있지 않습니다.")
+    user = require_user(request)
+    cfg = db.load_weekly_config(user["username"])
+    fmt_text = cfg.get("format_text") or ""
+    fmt_assets = cfg.get("format_assets") or []
+    guide_prompt = (cfg.get("guide_prompt") or "").strip()
+
+    if not fmt_text.strip() and not fmt_assets:
+        raise HTTPException(400, "먼저 '내 보고 형식'을 등록/저장해 주세요.")
+    if not text.strip() and not images:
+        raise HTTPException(400, "이번 주 업무 내용(메모/이미지)을 입력해 주세요.")
+
+    today = datetime.now()
+    iso_year, iso_week, _ = today.isocalendar()
+    system_prompt = f"""당신은 '주간 업무 보고서' 작성 도우미입니다.
+사용자가 등록해 둔 '보고 형식'을 그대로 본떠서, 이번 주 업무 메모를 정돈된 주간 보고로 작성하세요.
+결과는 **Outlook 등 이메일에 붙여넣어도 서식이 유지되도록 HTML 조각**으로 출력합니다.
+
+오늘은 {today.strftime('%Y-%m-%d')}, {iso_year}년 {iso_week}주차입니다.
+
+내용 규칙:
+- 반드시 사용자의 형식(섹션 구성, 말투, 불릿 스타일, 표현, 순서)을 따르세요. 형식이 이미지로 주어졌다면 그 레이아웃/구성을 최대한 반영합니다.
+- 메모에 있는 내용만 사용하고, 사실을 지어내지 마세요. 근거가 부족한 칸은 비워두거나 "해당 없음"으로 두세요.
+- 한국어로 작성하세요.
+
+출력(HTML) 규칙 — 매우 중요:
+- <html>/<head>/<body> 태그 없이 **본문 HTML 조각만** 출력하세요. 마크다운, 코드펜스(```), 설명/머리말 모두 금지.
+- 사용할 수 있는 태그: <p>, <br>, <b>, <strong>, <u>, <ul>, <ol>, <li>, <h3>, <h4>, <table>, <tr>, <td>, <th>.
+- 섹션 제목은 <h3> 또는 <p><b>제목</b></p> 으로, 항목 나열은 <ul><li>…</li></ul> 로 작성하세요.
+- 표 형식이 필요하면 <table border="1" cellspacing="0" cellpadding="4"> 를 사용하세요.
+- style 속성은 꼭 필요할 때만 인라인으로 최소한만 쓰세요(아웃룩 호환). class/id/script/외부 CSS 금지.
+"""
+
+    if guide_prompt:
+        system_prompt += f"""
+[작성 가이드 - 사용자가 등록한 추가 지침]
+아래 지침을 보고서 작성 시 반드시 반영하세요. 형식 규칙과 충돌하지 않는 범위에서 우선합니다.
+{guide_prompt}
+"""
+
+    content_blocks: list = []
+
+    # 1) 사용자 형식 (텍스트 + 이미지)
+    if fmt_text.strip():
+        content_blocks.append({"type": "text", "text": f"[내 보고 형식 - 텍스트]\n{fmt_text}"})
+    for a in fmt_assets:
+        data = a.get("data")
+        if not data:
+            continue
+        content_blocks.append({"type": "text", "text": f"[내 보고 형식 - 이미지: {a.get('name','')}]"})
+        content_blocks.append({
+            "type": "image",
+            "source": {"type": "base64", "media_type": a.get("media_type", "image/png"), "data": data},
+        })
+
+    # 2) 이번 주 업무 메모
+    content_blocks.append({"type": "text", "text": "[이번 주 업무 메모]"})
+    if text.strip():
+        content_blocks.append({"type": "text", "text": text})
+    for img in images:
+        if not img.filename:
+            continue
+        b = await img.read()
+        if not b:
+            continue
+        content_blocks.append({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": img.content_type or "image/png",
+                "data": base64.b64encode(b).decode(),
+            },
+        })
+
+    try:
+        msg = claude.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=4096,
+            system=system_prompt,
+            messages=[{"role": "user", "content": content_blocks}],
+        )
+    except Exception as e:
+        raise HTTPException(500, f"Claude API 호출 실패: {e}")
+
+    draft = "".join(
+        b.text for b in msg.content if getattr(b, "type", "") == "text"
+    )
+    draft = _strip_code_fence(draft)
+    return {"draft_html": draft}
+
+
+# ---------- monthly operations report ----------
+
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 업로드 파일 20MB 상한
+
+_DEFAULT_MONTHLY_OPTS = {
+    "all_closed": True,          # 상태를 모두 '종료'로 표시
+    "default_assignee": "",      # 담당자 고정값(빈 값이면 원본 유지)
+    "md_per_mm": monthly.DEFAULT_MD_PER_MM,  # 1 M/M 환산 일수
+    "report_month": "",          # 보고 월 표기(예: "05월") — 비우면 자동
+    "guide_prompt": "",          # 요약/Insight 작성 가이드
+}
+
+
+def _merge_monthly_opts(saved: dict) -> dict:
+    opts = dict(_DEFAULT_MONTHLY_OPTS)
+    if isinstance(saved, dict):
+        for k in opts:
+            if k in saved and saved[k] is not None:
+                opts[k] = saved[k]
+    return opts
+
+
+class MonthlyConfigIn(BaseModel):
+    all_closed: bool = True
+    default_assignee: str = ""
+    md_per_mm: int = monthly.DEFAULT_MD_PER_MM
+    report_month: str = ""
+    guide_prompt: str = ""
+
+
+@app.get("/api/monthly/config")
+async def api_monthly_get(request: Request):
+    user = require_user(request)
+    return _merge_monthly_opts(db.load_monthly_config(user["username"]))
+
+
+@app.post("/api/monthly/config")
+async def api_monthly_save(body: MonthlyConfigIn, request: Request):
+    user = require_user(request)
+    opts = {
+        "all_closed": bool(body.all_closed),
+        "default_assignee": body.default_assignee or "",
+        "md_per_mm": int(body.md_per_mm) if body.md_per_mm else monthly.DEFAULT_MD_PER_MM,
+        "report_month": body.report_month or "",
+        "guide_prompt": body.guide_prompt or "",
+    }
+    db.save_monthly_config(user["username"], opts)
+    log.info("[/api/monthly/config] user=%s saved opts", user["username"])
+    return {"ok": True}
+
+
+def _monthly_ai_content(stats: dict, rows: list, report_month: str, guide_prompt: str) -> dict:
+    """Claude로 '주요 업무 요약' + '장애예방/운영 Insight' 생성. 실패해도 빈 값 반환."""
+    empty = {"summary": {}, "insight": {}, "error": ""}
+    if claude is None:
+        empty["error"] = "CLAUDE_API_KEY가 설정되어 있지 않아 AI 요약을 건너뜁니다."
+        return empty
+    systems = stats.get("systems", [])
+    if not systems:
+        return empty
+
+    # 시스템별 이슈 제목 모음 (토큰 절약 위해 제목만)
+    by_sys: dict = {}
+    for r in rows:
+        by_sys.setdefault(r["_service"], []).append(r["issue"])
+    lines = []
+    for sys_name in systems:
+        titles = by_sys.get(sys_name, [])
+        joined = "\n".join(f"  - {t}" for t in titles[:60])
+        lines.append(f"[{sys_name}] ({len(titles)}건)\n{joined}")
+    issues_block = "\n\n".join(lines)
+
+    month_label = report_month or "해당월"
+    guide_extra = f"\n\n[작성 가이드]\n{guide_prompt}" if guide_prompt.strip() else ""
+
+    system_prompt = f"""당신은 IT 시스템 운영보고서 작성 도우미입니다.
+시스템별 이슈 목록을 보고, 운영보고 PPT에 넣을 두 가지를 작성하세요.
+
+1) summary: 시스템별 '{month_label} 주요 업무'를 각 50자 내외로 1줄 요약.
+   - 전체를 나열하지 말고, 그 시스템의 핵심 맥락이 되는 업무 위주로 압축.
+2) insight: 시스템별 '장애예방/운영 Insight' 코멘트를 2~4건, 각 50자 이내.
+   - 이슈에서 도출되는 리스크/개선점/예방 포인트를 운영 관점으로.
+
+규칙:
+- 한국어, 개조식(명사형 종결) 톤.
+- 반드시 주어진 이슈 내용에 근거하고 지어내지 마세요.
+- 시스템 키는 입력에 등장한 시스템명을 그대로 사용하세요.
+- 출력은 아래 JSON 형식만, 코드펜스/설명 없이 출력하세요:
+{{"summary": {{"시스템명": "요약문"}}, "insight": {{"시스템명": ["코멘트1", "코멘트2"]}}}}{guide_extra}
+"""
+    user_text = f"대상 시스템: {', '.join(systems)}\n\n[시스템별 이슈]\n{issues_block}"
+    try:
+        msg = claude.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=2048,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_text}],
+        )
+        text = "".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
+        text = _strip_code_fence(text).strip()
+        data = json.loads(text)
+        return {
+            "summary": data.get("summary", {}) or {},
+            "insight": data.get("insight", {}) or {},
+            "error": "",
+        }
+    except Exception as e:
+        log.warning("[monthly] AI content failed: %s", e)
+        empty["error"] = f"AI 요약 생성 실패: {e}"
+        return empty
+
+
+@app.post("/api/monthly/generate")
+async def api_monthly_generate(
+    request: Request,
+    file: UploadFile = File(...),
+    all_closed: bool = Form(True),
+    default_assignee: str = Form(""),
+    md_per_mm: int = Form(monthly.DEFAULT_MD_PER_MM),
+    report_month: str = Form(""),
+    guide_prompt: str = Form(""),
+    with_ai: bool = Form(True),
+):
+    user = require_user(request)
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "빈 파일입니다. Jira에서 export 한 파일을 올려 주세요.")
+    if len(raw) > MAX_UPLOAD_BYTES:
+        raise HTTPException(400, "파일이 너무 큽니다(20MB 초과).")
+
+    try:
+        issues = monthly.parse_jira_export(raw, file.filename or "")
+    except Exception as e:
+        raise HTTPException(400, f"파일을 해석하지 못했습니다: {e}")
+    if not issues:
+        raise HTTPException(400, "이슈를 찾지 못했습니다. Jira export(.xls/.csv) 파일인지 확인해 주세요.")
+
+    mm_div = int(md_per_mm) if md_per_mm else monthly.DEFAULT_MD_PER_MM
+    rows = monthly.build_rows(issues, all_closed=bool(all_closed),
+                              default_assignee=default_assignee or "")
+    stats = monthly.build_stats(rows, md_per_mm=mm_div)
+
+    xls_html = monthly.render_xls(rows)
+    stats_html = monthly.render_stats_html(stats)
+
+    ai = {"summary": {}, "insight": {}, "error": ""}
+    if with_ai:
+        ai = _monthly_ai_content(stats, rows, report_month or "", guide_prompt or "")
+
+    log.info("[/api/monthly/generate] user=%s issues=%d systems=%s md=%.2f",
+             user["username"], len(issues), stats["systems"], stats["total_md"])
+
+    # 미리보기용 행(내부 메타 제거)
+    preview = [
+        {"issue": r["issue"], "note": r["note"], "status": r["status"],
+         "md": r["md_text"], "assignee": r["assignee"]}
+        for r in rows
+    ]
+    fname_month = (report_month or "").replace("/", "-").strip()
+    download_name = f"월간운영보고_{fname_month or datetime.now().strftime('%Y%m')}.xls"
+
+    return {
+        "count": len(rows),
+        "rows": preview,
+        "stats": stats,
+        "stats_html": stats_html,
+        "xls_base64": base64.b64encode(xls_html.encode("utf-8")).decode(),
+        "download_name": download_name,
+        "summary": ai["summary"],
+        "insight": ai["insight"],
+        "ai_error": ai["error"],
+        "total_md": stats["total_md"],
+        "mm": stats["mm"],
+    }
 
 
 if __name__ == "__main__":
