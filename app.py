@@ -547,6 +547,29 @@ def _strip_code_fence(text: str) -> str:
     return t.strip()
 
 
+def _salvage_truncated_json_array(text: str) -> Optional[list]:
+    """잘린 JSON 배열에서 완성된 객체까지만 파싱해서 복구. 실패 시 None."""
+    start = text.find("[")
+    if start == -1:
+        return None
+    decoder = json.JSONDecoder()
+    items = []
+    idx = start + 1
+    n = len(text)
+    while idx < n:
+        while idx < n and text[idx] in " \t\r\n,":
+            idx += 1
+        if idx >= n or text[idx] == "]":
+            break
+        try:
+            obj, end = decoder.raw_decode(text, idx)
+        except json.JSONDecodeError:
+            break  # 여기서부터 잘린 부분 — 지금까지 완성된 객체만 반환
+        items.append(obj)
+        idx = end
+    return items if items else None
+
+
 def _parse_memo_date(value) -> Optional[str]:
     """AI가 추출한 날짜 문자열을 'M/D'로 변환. 없거나 형식이 이상하면 None."""
     if not value or not isinstance(value, str):
@@ -678,7 +701,7 @@ date(날짜) 규칙:
     try:
         msg = claude.messages.create(
             model=settings.get("claude_model", "claude-sonnet-4-6"),
-            max_tokens=4096,
+            max_tokens=16384,
             system=system_prompt,
             messages=[{"role": "user", "content": content_blocks}],
         )
@@ -695,10 +718,15 @@ date(날짜) 규칙:
         if not isinstance(issues, list):
             issues = [issues]
     except json.JSONDecodeError:
-        raise HTTPException(
-            500,
-            f"Claude 응답을 JSON으로 파싱하지 못했습니다.\n--- raw ---\n{raw}",
-        )
+        # max_tokens 도달 등으로 응답이 잘린 경우, 완성된 객체까지만 복구 시도
+        issues = _salvage_truncated_json_array(cleaned)
+        if issues is None:
+            truncated = getattr(msg, "stop_reason", "") == "max_tokens"
+            hint = " (max_tokens 도달로 응답이 잘렸습니다)" if truncated else ""
+            raise HTTPException(
+                500,
+                f"Claude 응답을 JSON으로 파싱하지 못했습니다{hint}.\n--- raw ---\n{raw}",
+            )
 
     today = datetime.now()
     today_date_str = f"{today.month}/{today.day}"
