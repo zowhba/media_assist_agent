@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>별의 커비 디펜스</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden;font-family:'Apple SD Gothic Neo','Malgun Gothic','Trebuchet MS',sans-serif}
+canvas{display:block}
+#topbar{position:fixed;top:14px;left:50%;transform:translateX(-50%);display:flex;gap:10px;z-index:5}
+.chip{background:rgba(255,255,255,.92);border-radius:999px;padding:8px 18px;font-weight:800;font-size:16px;color:#5a4a6a;box-shadow:0 4px 12px rgba(90,60,120,.18)}
+#towerbar{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);display:flex;gap:10px;z-index:5}
+.card{width:106px;background:rgba(255,255,255,.94);border-radius:18px;padding:10px 8px;text-align:center;cursor:pointer;border:3px solid transparent;box-shadow:0 6px 14px rgba(90,60,120,.2);transition:transform .12s,border-color .12s;user-select:none}
+.card:hover{transform:translateY(-4px)}
+.card.sel{border-color:#ff7eb3;transform:translateY(-6px)}
+.card.poor{opacity:.45;filter:grayscale(.6)}
+.avatar{width:44px;height:44px;border-radius:50%;margin:0 auto 6px;box-shadow:inset -4px -6px 8px rgba(0,0,0,.12)}
+.cname{font-weight:800;color:#5a4a6a;font-size:13px}
+.cost{color:#e8a000;font-weight:800;font-size:13px}
+.cdesc{color:#9a8aa8;font-size:11px}
+#startBtn{position:fixed;right:18px;bottom:22px;z-index:5;background:linear-gradient(#ff9ec3,#ff7eb3);color:#fff;font-weight:900;font-size:17px;border:none;border-radius:999px;padding:14px 26px;cursor:pointer;box-shadow:0 6px 16px rgba(255,126,179,.5);transition:transform .12s}
+#startBtn:hover{transform:scale(1.06)}
+.hidden{display:none!important}
+#banner{position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:6;background:rgba(255,255,255,.95);color:#e85d9e;font-weight:900;font-size:22px;padding:10px 28px;border-radius:999px;box-shadow:0 6px 18px rgba(90,60,120,.25);opacity:0;transition:opacity .25s;pointer-events:none;white-space:nowrap}
+#overlay{position:fixed;inset:0;background:rgba(70,40,90,.45);z-index:10;display:flex;align-items:center;justify-content:center}
+#overlayCard{background:#fff;border-radius:28px;padding:36px 44px;text-align:center;max-width:460px;box-shadow:0 20px 50px rgba(0,0,0,.3)}
+#overlayCard h1{color:#e85d9e;font-size:30px;margin-bottom:12px}
+#overlayCard p{color:#7a6a8a;font-size:15px;line-height:1.7;margin-bottom:20px}
+#overlayCard button{background:linear-gradient(#ff9ec3,#ff7eb3);border:none;color:#fff;font-size:17px;font-weight:900;padding:12px 32px;border-radius:999px;cursor:pointer;box-shadow:0 6px 16px rgba(255,126,179,.5)}
+#hint{position:fixed;bottom:122px;left:50%;transform:translateX(-50%);color:#fff;background:rgba(90,60,120,.5);padding:6px 18px;border-radius:999px;font-size:13px;z-index:4;white-space:nowrap}
+#redflash{position:fixed;inset:0;background:radial-gradient(transparent 55%,rgba(255,60,80,.55));opacity:0;pointer-events:none;z-index:8;transition:opacity .5s}
+</style>
+</head>
+<body>
+<div id="topbar">
+  <div class="chip">❤️ <span id="lives">10</span></div>
+  <div class="chip">⭐ <span id="gold">130</span></div>
+  <div class="chip" id="waveLabel">WAVE 준비</div>
+</div>
+<div id="towerbar"></div>
+<button id="startBtn" class="hidden">▶ 웨이브 시작</button>
+<div id="banner"></div>
+<div id="hint" class="hidden">카드를 고른 뒤 초원을 클릭해 배치! (우클릭: 취소)</div>
+<div id="redflash"></div>
+<div id="overlay">
+  <div id="overlayCard">
+    <h1>🌟 별의 커비 디펜스</h1>
+    <p>팝스타 초원에 적들이 몰려와요!<br>
+    <b>커비 친구들</b>을 길 옆에 배치해서 골인 지점의 별을 지켜주세요.<br>
+    총 <b>3개의 웨이브</b>가 몰려오고, 마지막엔 <b>디디디 대왕</b>이 등장합니다 👑</p>
+    <button id="overlayBtn">게임 시작!</button>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/* ================= 기본 셋업 ================= */
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xb8e3ff);
+scene.fog = new THREE.Fog(0xb8e3ff, 34, 70);
+
+const camera = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.1, 200);
+function fitCamera(){
+  const a = innerWidth/innerHeight;
+  // 좁은 화면일수록 카메라를 더 높고 멀리 빼서 맵 전체가 보이게
+  const k = Math.max(1, 1.6/Math.max(a, 0.6));
+  camera.position.set(0, 17*k, 14.5*k);
+  camera.lookAt(0, 0, -1);
+}
+fitCamera();
+
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xfff6e8, 0x88c070, 0.55));
+const sun = new THREE.DirectionalLight(0xfff2d8, 0.5);
+sun.position.set(8, 18, 6);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -24; sun.shadow.camera.right = 24;
+sun.shadow.camera.top = 24; sun.shadow.camera.bottom = -24;
+scene.add(sun);
+
+/* ================= 헬퍼 ================= */
+function toonMat(c){ return new THREE.MeshToonMaterial({color:c}); }
+function mesh(geo, color){ const m = new THREE.Mesh(geo, toonMat(color)); m.castShadow = true; return m; }
+function ball(r, c, sx=1, sy=1, sz=1, seg=20){
+  const m = new THREE.Mesh(new THREE.SphereGeometry(r, seg, seg), toonMat(c));
+  m.scale.set(sx, sy, sz); m.castShadow = true; return m;
+}
+function at(m, x, y, z){ m.position.set(x, y, z); return m; }
+function v(x, y, z){ return new THREE.Vector3(x, y, z); }
+
+function makeStarGeo(outer, inner){
+  const s = new THREE.Shape();
+  for(let i=0;i<10;i++){
+    const r = i%2===0 ? outer : inner;
+    const a = i/10*Math.PI*2 - Math.PI/2;
+    const x = Math.cos(a)*r, y = Math.sin(a)*r;
+    i===0 ? s.moveTo(x,y) : s.lineTo(x,y);
+  }
+  s.closePath();
+  const g = new THREE.ExtrudeGeometry(s, {depth: outer*0.35, bevelEnabled:false});
+  g.center(); return g;
+}
+const starGeoSmall = makeStarGeo(0.22, 0.1);
+const starGeoTiny  = makeStarGeo(0.12, 0.05);
+const matCache = {};
+function projMat(c){ if(!matCache[c]) matCache[c] = new THREE.MeshBasicMaterial({color:c}); return matCache[c]; }
+
+/* ================= 사운드 ================= */
+let AC = null;
+function ensureAC(){ if(!AC){ try{ AC = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } }
+function sfx(f0, f1, dur, type='triangle', vol=0.05){
+  if(!AC) return;
+  const t = AC.currentTime;
+  const o = AC.createOscillator(), g = AC.createGain();
+  o.type = type;
+  o.frequency.setValueAtTime(f0, t);
+  o.frequency.exponentialRampToValueAtTime(Math.max(f1,1), t+dur);
+  g.gain.setValueAtTime(vol, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
+  o.connect(g); g.connect(AC.destination);
+  o.start(t); o.stop(t+dur);
+}
+
+/* ================= 맵 ================= */
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(46, 26), toonMat(0x8fd460));
+ground.rotation.x = -Math.PI/2;
+ground.receiveShadow = true;
+ground.castShadow = false;
+scene.add(ground);
+
+const curve = new THREE.CatmullRomCurve3([
+  v(-22,0,-3), v(-16,0,-4), v(-10,0,-4.5), v(-5,0,-1.5), v(-1.5,0,3.2),
+  v(3.5,0,4.2), v(7.5,0,1.5), v(9,0,-2.5), v(13,0,-4.5), v(18,0,-3), v(22,0,0)
+]);
+const curveLen = curve.getLength();
+const pathPts = curve.getSpacedPoints(220);
+function distToPath(p){
+  let d = 1e9;
+  for(const q of pathPts){
+    const dx = p.x-q.x, dz = p.z-q.z, dd = dx*dx+dz*dz;
+    if(dd<d) d = dd;
+  }
+  return Math.sqrt(d);
+}
+
+(function buildRoad(){
+  const N = 160, w = 1.6, pos = [], idx = [];
+  for(let i=0;i<=N;i++){
+    const t = i/N, p = curve.getPointAt(t), tg = curve.getTangentAt(t);
+    const nx = -tg.z, nz = tg.x;
+    pos.push(p.x+nx*w/2, 0.03, p.z+nz*w/2,  p.x-nx*w/2, 0.03, p.z-nz*w/2);
+  }
+  for(let i=0;i<N;i++){
+    const a = i*2;
+    idx.push(a, a+2, a+1,  a+1, a+2, a+3);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx); g.computeVertexNormals();
+  const m = new THREE.Mesh(g, toonMat(0xf2dca8));
+  m.receiveShadow = true;
+  scene.add(m);
+})();
+
+// 골인 지점의 큰 별
+const goalStar = mesh(makeStarGeo(0.85, 0.4), 0xffd24a);
+const goalPos = curve.getPointAt(0.94);
+goalStar.position.set(goalPos.x, 1.5, goalPos.z);
+scene.add(goalStar);
+const goalBase = mesh(new THREE.CylinderGeometry(0.5, 0.7, 0.5, 16), 0xffe9b0);
+goalBase.position.set(goalPos.x, 0.25, goalPos.z);
+scene.add(goalBase);
+
+// 나무 (테두리 쪽에만)
+function makeTree(){
+  const g = new THREE.Group();
+  g.add(at(mesh(new THREE.CylinderGeometry(0.16,0.22,0.7,10), 0x9a6a4a), 0, 0.35, 0));
+  g.add(at(ball(0.62, 0x6fc46f), 0, 1.15, 0));
+  g.add(at(ball(0.45, 0x8fd98f), 0.38, 1.5, 0.1));
+  g.add(at(ball(0.4, 0x5fb45f), -0.36, 1.45, -0.1));
+  return g;
+}
+for(let i=0;i<14;i++){
+  let p, tries = 0;
+  do {
+    p = v((Math.random()*2-1)*21, 0, (Math.random()*2-1)*12);
+    tries++;
+  } while(tries<40 && (distToPath(p)<2.4 || (Math.abs(p.x)<14.8 && Math.abs(p.z)<8.8)));
+  const t = makeTree();
+  t.position.copy(p);
+  t.scale.setScalar(0.8+Math.random()*0.5);
+  t.rotation.y = Math.random()*Math.PI*2;
+  scene.add(t);
+}
+// 꽃 점들
+const flowerColors = [0xffffff, 0xffe066, 0xff9ec3, 0xc79ef0];
+for(let i=0;i<46;i++){
+  const p = v((Math.random()*2-1)*21, 0.07, (Math.random()*2-1)*12);
+  if(distToPath(p)<1.4) continue;
+  const f = ball(0.08, flowerColors[i%4]);
+  f.castShadow = false;
+  f.position.copy(p);
+  scene.add(f);
+}
+// 구름
+const clouds = [];
+function makeCloud(){
+  const g = new THREE.Group();
+  const m = new THREE.MeshToonMaterial({color:0xffffff});
+  [[0,0,0,0.85],[0.9,0.15,0.1,0.6],[-0.85,0.1,-0.1,0.55]].forEach(c=>{
+    const b = new THREE.Mesh(new THREE.SphereGeometry(c[3],16,12), m);
+    b.position.set(c[0],c[1],c[2]); g.add(b);
+  });
+  return g;
+}
+for(let i=0;i<6;i++){
+  const c = makeCloud();
+  c.position.set((Math.random()*2-1)*22, 6.5+Math.random()*3, -6-Math.random()*8);
+  c.scale.setScalar(0.8+Math.random()*0.8);
+  scene.add(c); clouds.push(c);
+}
+
+/* ================= 캐릭터 ================= */
+function makeKirby(){
+  const g = new THREE.Group();
+  const pink = 0xff9ec3;
+  g.add(at(ball(0.55, pink), 0, 0.58, 0));
+  g.add(at(ball(0.2, pink), -0.52, 0.75, 0.1), at(ball(0.2, pink), 0.52, 0.75, 0.1));
+  g.add(at(ball(0.21, 0xd23b6d, 1.15, 0.6, 1.3), -0.27, 0.12, 0.06));
+  g.add(at(ball(0.21, 0xd23b6d, 1.15, 0.6, 1.3), 0.27, 0.12, 0.06));
+  g.add(at(ball(0.075, 0x1b2a4a, 1, 2.1, 0.5), -0.18, 0.74, 0.5));
+  g.add(at(ball(0.075, 0x1b2a4a, 1, 2.1, 0.5), 0.18, 0.74, 0.5));
+  g.add(at(ball(0.032, 0xffffff), -0.17, 0.82, 0.52), at(ball(0.032, 0xffffff), 0.17, 0.82, 0.52));
+  g.add(at(ball(0.075, 0xff6fa5, 1, 0.55, 0.35), -0.36, 0.55, 0.42));
+  g.add(at(ball(0.075, 0xff6fa5, 1, 0.55, 0.35), 0.36, 0.55, 0.42));
+  g.add(at(ball(0.05, 0x8b1e3f, 1.5, 1, 0.4), 0, 0.47, 0.54));
+  return g;
+}
+
+function makeWaddleDee(bandana){
+  const g = new THREE.Group();
+  const body = 0xe07b39;
+  g.add(at(ball(0.46, body), 0, 0.5, 0));
+  g.add(at(ball(0.34, 0xfbd99e, 1.05, 0.82, 0.55), 0, 0.48, 0.3));
+  g.add(at(ball(0.055, 0x222222, 1, 1.9, 0.5), -0.14, 0.6, 0.48));
+  g.add(at(ball(0.055, 0x222222, 1, 1.9, 0.5), 0.14, 0.6, 0.48));
+  g.add(at(ball(0.18, 0xcf6420, 1.1, 0.6, 1.25), -0.23, 0.1, 0.05));
+  g.add(at(ball(0.18, 0xcf6420, 1.1, 0.6, 1.25), 0.23, 0.1, 0.05));
+  g.add(at(ball(0.15, body), -0.43, 0.55, 0.08), at(ball(0.15, body), 0.43, 0.55, 0.08));
+  if(bandana){
+    g.add(at(ball(0.42, 0x2e6fe0, 1.08, 0.42, 1.08), 0, 0.88, 0));
+    g.add(at(ball(0.1, 0x2e6fe0, 0.7, 1.6, 0.5), 0, 0.78, -0.45));
+    const spear = new THREE.Group();
+    spear.add(mesh(new THREE.CylinderGeometry(0.035, 0.035, 1.3, 8), 0x9a6a3a));
+    spear.add(at(mesh(new THREE.ConeGeometry(0.09, 0.26, 10), 0xd8dde8), 0, 0.75, 0));
+    spear.position.set(0.52, 0.62, 0.15);
+    spear.rotation.z = -0.22;
+    g.add(spear);
+  }
+  return g;
+}
+function makeBandanaDee(){ return makeWaddleDee(true); }
+
+function makeWaddleDoo(){
+  const g = new THREE.Group();
+  const body = 0xd96a2e;
+  g.add(at(ball(0.46, body), 0, 0.5, 0));
+  g.add(at(ball(0.17, 0xffffff, 1, 1.5, 0.6), 0, 0.58, 0.42));
+  g.add(at(ball(0.09, 0x3d6ff2, 1, 1.5, 0.6), 0, 0.58, 0.48));
+  g.add(at(ball(0.045, 0x111111, 1, 1.5, 0.6), 0, 0.58, 0.52));
+  g.add(at(ball(0.18, 0xb5521f, 1.1, 0.6, 1.25), -0.23, 0.1, 0.05));
+  g.add(at(ball(0.18, 0xb5521f, 1.1, 0.6, 1.25), 0.23, 0.1, 0.05));
+  g.add(at(ball(0.14, body), -0.42, 0.55, 0.08), at(ball(0.14, body), 0.42, 0.55, 0.08));
+  return g;
+}
+
+function makeBrontoBurt(){
+  const g = new THREE.Group();
+  const pink = 0xf06fb8;
+  g.add(at(ball(0.42, pink), 0, 0.45, 0));
+  g.add(at(ball(0.11, 0xffffff, 1, 1.7, 0.5), -0.14, 0.52, 0.39));
+  g.add(at(ball(0.11, 0xffffff, 1, 1.7, 0.5), 0.14, 0.52, 0.39));
+  g.add(at(ball(0.045, 0x222222, 1, 1.5, 0.5), -0.14, 0.52, 0.46));
+  g.add(at(ball(0.045, 0x222222, 1, 1.5, 0.5), 0.14, 0.52, 0.46));
+  g.add(at(ball(0.12, 0xc94d92, 1, 0.7, 1), -0.15, 0.02, 0.05));
+  g.add(at(ball(0.12, 0xc94d92, 1, 0.7, 1), 0.15, 0.02, 0.05));
+  const wings = [];
+  for(const s of [-1, 1]){
+    const wg = new THREE.Group();
+    wg.position.set(0.2*s, 0.78, -0.18);
+    const wm = ball(0.3, 0xf0f6ff, 0.45, 1.15, 0.16);
+    wm.position.set(0.12*s, 0.3, 0);
+    wg.add(wm);
+    wg.userData.side = s;
+    g.add(wg); wings.push(wg);
+  }
+  g.userData.wings = wings;
+  return g;
+}
+
+function makeMetaKnight(){
+  const g = new THREE.Group();
+  g.add(at(ball(0.5, 0x3b3f9e), 0, 0.55, 0));
+  g.add(at(ball(0.5, 0xcfd6e4, 1.02, 0.92, 0.55), 0, 0.57, 0.26));
+  const eyeMat = new THREE.MeshBasicMaterial({color:0xffe066});
+  for(const s of [-1, 1]){
+    const e = new THREE.Mesh(new THREE.SphereGeometry(0.07, 14, 14), eyeMat);
+    e.scale.set(1, 1.9, 0.5); e.position.set(0.16*s, 0.62, 0.54);
+    g.add(e);
+  }
+  g.add(at(ball(0.16, 0x6a5acd), -0.46, 0.85, 0), at(ball(0.16, 0x6a5acd), 0.46, 0.85, 0));
+  const cape = mesh(new THREE.ConeGeometry(0.52, 1.15, 16), 0x4b2a6e);
+  cape.position.set(0, 0.55, -0.34);
+  cape.rotation.x = -0.28;
+  g.add(cape);
+  g.add(at(ball(0.17, 0x5b3a8e, 1.1, 0.6, 1.25), -0.22, 0.1, 0.06));
+  g.add(at(ball(0.17, 0x5b3a8e, 1.1, 0.6, 1.25), 0.22, 0.1, 0.06));
+  const sword = new THREE.Group();
+  sword.add(at(mesh(new THREE.BoxGeometry(0.07, 0.85, 0.03), 0xffd24a), 0, 0.42, 0));
+  sword.add(mesh(new THREE.BoxGeometry(0.24, 0.06, 0.06), 0xc9a227));
+  sword.position.set(0.58, 0.62, 0.1);
+  sword.rotation.z = -0.5;
+  g.add(sword);
+  return g;
+}
+
+function makeDedede(){
+  const g = new THREE.Group();
+  g.add(at(ball(0.95, 0x4169d0, 1, 1.05, 0.92), 0, 1.0, 0));
+  g.add(at(ball(0.62, 0xfff0c2, 0.95, 0.95, 0.5), 0, 0.85, 0.62));
+  const beakU = mesh(new THREE.ConeGeometry(0.2, 0.55, 14), 0xf5c542);
+  beakU.rotation.x = Math.PI/2; beakU.position.set(0, 1.28, 1.0);
+  const beakL = mesh(new THREE.ConeGeometry(0.15, 0.4, 14), 0xe0a82e);
+  beakL.rotation.x = Math.PI/2; beakL.position.set(0, 1.08, 0.95);
+  g.add(beakU, beakL);
+  g.add(at(ball(0.13, 0xffffff, 1, 1.6, 0.5), -0.22, 1.52, 0.78));
+  g.add(at(ball(0.13, 0xffffff, 1, 1.6, 0.5), 0.22, 1.52, 0.78));
+  g.add(at(ball(0.055, 0x222222, 1, 1.6, 0.5), -0.22, 1.52, 0.86));
+  g.add(at(ball(0.055, 0x222222, 1, 1.6, 0.5), 0.22, 1.52, 0.86));
+  const hat = mesh(new THREE.ConeGeometry(0.55, 0.9, 18), 0xe04848);
+  hat.position.set(0, 2.35, 0);
+  const rim = mesh(new THREE.TorusGeometry(0.5, 0.11, 10, 24), 0xffffff);
+  rim.rotation.x = Math.PI/2; rim.position.set(0, 1.95, 0);
+  g.add(hat, rim, at(ball(0.16, 0xffffff), 0, 2.85, 0));
+  g.add(at(ball(0.28, 0xe04848), -0.85, 1.05, 0.2), at(ball(0.28, 0xe04848), 0.85, 1.05, 0.2));
+  g.add(at(ball(0.18, 0xffe9c0), -1.0, 0.9, 0.35), at(ball(0.18, 0xffe9c0), 1.0, 0.9, 0.35));
+  g.add(at(ball(0.3, 0xf5c542, 1.2, 0.5, 1.5), -0.4, 0.13, 0.1));
+  g.add(at(ball(0.3, 0xf5c542, 1.2, 0.5, 1.5), 0.4, 0.13, 0.1));
+  const hammer = new THREE.Group();
+  hammer.add(mesh(new THREE.CylinderGeometry(0.06, 0.06, 1.5, 10), 0xb5803f));
+  const head = mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.7, 16), 0xe04848);
+  head.rotation.x = Math.PI/2; head.position.y = 0.85;
+  hammer.add(head);
+  hammer.position.set(1.15, 1.1, 0.25);
+  hammer.rotation.z = -0.5;
+  g.add(hammer);
+  return g;
+}
+
+/* ================= 게임 데이터 ================= */
+const TOWER_TYPES = {
+  kirby: {name:'커비', desc:'균형형', cost:50, range:4.5, rate:0.8, dmg:14,
+    projColor:0xffd24a, projScale:1, baseColor:0xffd9e8,
+    css:'radial-gradient(circle at 35% 30%,#ffc6dd,#ff8fbe)', sfx:[950,520], build:makeKirby},
+  dee: {name:'반다나 디', desc:'빠른 공격', cost:80, range:3.8, rate:0.35, dmg:8,
+    projColor:0x69d2ff, projScale:0.8, baseColor:0xcfe8ff,
+    css:'radial-gradient(circle at 35% 30%,#ffba74,#e8762c)', sfx:[1200,700], build:makeBandanaDee},
+  meta: {name:'메타 나이트', desc:'강력한 한 방', cost:120, range:6, rate:1.5, dmg:42,
+    projColor:0xb07ef0, projScale:1.6, baseColor:0xd9ccf2,
+    css:'radial-gradient(circle at 35% 30%,#7d7dd9,#3b3f9e)', sfx:[700,200], build:makeMetaKnight},
+};
+
+const ENEMY_TYPES = {
+  wdee:   {name:'와들디', hp:45, speed:1.5, reward:12, flyY:0, barY:1.3, bar:0.9, build:()=>makeWaddleDee(false)},
+  doo:    {name:'와들두', hp:80, speed:1.8, reward:16, flyY:0, barY:1.3, bar:0.9, build:makeWaddleDoo},
+  burt:   {name:'브론토 버트', hp:55, speed:2.4, reward:18, flyY:1.2, barY:1.5, bar:0.9, build:makeBrontoBurt},
+  dedede: {name:'디디디 대왕', hp:1100, speed:0.65, reward:300, flyY:0, barY:3.5, bar:1.8, dmgToBase:5, boss:true, build:makeDedede},
+};
+
+const WAVES = [
+  [ {type:'wdee', count:8, interval:1.1} ],
+  [ {type:'wdee', count:8, interval:0.9}, {type:'doo', count:4, interval:1.2}, {type:'burt', count:3, interval:1.0} ],
+  [ {type:'wdee', count:10, interval:0.7}, {type:'burt', count:5, interval:0.8}, {type:'doo', count:6, interval:0.9}, {type:'dedede', count:1, interval:2} ],
+];
+
+/* ================= 게임 상태 ================= */
+let state = 'intro';
+let gold = 130, lives = 10, wave = 0;
+const towers = [], enemies = [], projectiles = [], particles = [];
+let spawnQueue = [], waveTime = 0;
+let selected = null, ghost = null;
+
+const $ = id => document.getElementById(id);
+const startBtn = $('startBtn'), banner = $('banner');
+
+function updateUI(){
+  $('gold').textContent = gold;
+  $('lives').textContent = lives;
+  $('waveLabel').textContent = wave === 0 ? 'WAVE 준비' : `WAVE ${wave}/3`;
+  document.querySelectorAll('.card').forEach(c=>{
+    c.classList.toggle('poor', gold < TOWER_TYPES[c.dataset.key].cost);
+  });
+}
+
+let bannerTO;
+function showBanner(t, dur=1800){
+  banner.textContent = t;
+  banner.style.opacity = 1;
+  clearTimeout(bannerTO);
+  bannerTO = setTimeout(()=>banner.style.opacity = 0, dur);
+}
+function flash(){
+  const f = $('redflash');
+  f.style.transition = 'none'; f.style.opacity = 1;
+  requestAnimationFrame(()=>{ f.style.transition = 'opacity .5s'; f.style.opacity = 0; });
+}
+
+/* ================= 타워 카드 UI ================= */
+const towerbar = $('towerbar');
+for(const [key, T] of Object.entries(TOWER_TYPES)){
+  const el = document.createElement('div');
+  el.className = 'card';
+  el.dataset.key = key;
+  el.innerHTML = `<div class="avatar" style="background:${T.css}"></div>
+    <div class="cname">${T.name}</div><div class="cost">⭐${T.cost}</div><div class="cdesc">${T.desc}</div>`;
+  el.title = `공격력 ${T.dmg} · 사거리 ${T.range} · ${T.rate}초마다 공격`;
+  el.addEventListener('click', ()=>{ ensureAC(); setSelected(selected===key ? null : key); });
+  towerbar.appendChild(el);
+}
+
+function makeGhost(T){
+  const g = new THREE.Group();
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(T.range-0.08, T.range, 48),
+    new THREE.MeshBasicMaterial({color:0x42c462, transparent:true, opacity:0.45, side:THREE.DoubleSide}));
+  ring.rotation.x = -Math.PI/2; ring.position.y = 0.06;
+  const body = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.55, 0.65, 1.0, 20),
+    new THREE.MeshBasicMaterial({color:0x42c462, transparent:true, opacity:0.35}));
+  body.position.y = 0.5;
+  g.add(ring, body);
+  g.userData = {ring, body};
+  return g;
+}
+function setSelected(key){
+  selected = key;
+  document.querySelectorAll('.card').forEach(c=>c.classList.toggle('sel', c.dataset.key===key));
+  if(ghost){ scene.remove(ghost); ghost = null; }
+  if(key){ ghost = makeGhost(TOWER_TYPES[key]); ghost.visible = false; scene.add(ghost); }
+}
+
+/* ================= 입력 ================= */
+const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
+function groundPoint(ev){
+  mouse.x = (ev.clientX/innerWidth)*2-1;
+  mouse.y = -(ev.clientY/innerHeight)*2+1;
+  ray.setFromCamera(mouse, camera);
+  const hit = ray.intersectObject(ground);
+  return hit.length ? hit[0].point : null;
+}
+function isValid(p){
+  if(!selected) return false;
+  if(Math.abs(p.x)>15 || Math.abs(p.z)>9) return false;
+  const d = distToPath(p);
+  if(d < 1.35 || d > 5.5) return false;
+  for(const t of towers) if(t.pos.distanceTo(p) < 1.5) return false;
+  if(gold < TOWER_TYPES[selected].cost) return false;
+  return true;
+}
+
+window.addEventListener('pointermove', ev=>{
+  if(!ghost) return;
+  const p = groundPoint(ev);
+  if(!p){ ghost.visible = false; return; }
+  ghost.visible = true;
+  ghost.position.set(p.x, 0, p.z);
+  const c = isValid(p) ? 0x42c462 : 0xe05555;
+  ghost.userData.ring.material.color.setHex(c);
+  ghost.userData.body.material.color.setHex(c);
+});
+
+renderer.domElement.addEventListener('pointerdown', ev=>{
+  ensureAC();
+  if(ev.button !== 0 || !selected) return;
+  const p = groundPoint(ev);
+  if(p && isValid(p)) placeTower(p);
+  else sfx(180, 120, 0.12, 'square', 0.04);
+});
+window.addEventListener('contextmenu', ev=>{ ev.preventDefault(); setSelected(null); });
+
+function placeTower(p){
+  const T = TOWER_TYPES[selected];
+  gold -= T.cost;
+  const group = T.build();
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.72, 0.82, 0.08, 24), toonMat(T.baseColor));
+  base.position.y = 0.04; base.receiveShadow = true;
+  group.add(base);
+  group.position.set(p.x, 0, p.z);
+  scene.add(group);
+  towers.push({T, group, cd:0, pos:v(p.x, 0, p.z), squash:0});
+  sfx(500, 900, 0.12);
+  $('hint').classList.add('hidden');
+  updateUI();
+}
+
+/* ================= 적 ================= */
+function makeHpBar(w){
+  const g = new THREE.Group();
+  const bg = new THREE.Mesh(new THREE.PlaneGeometry(w, 0.13), new THREE.MeshBasicMaterial({color:0x333344}));
+  const fg = new THREE.Mesh(new THREE.PlaneGeometry(w, 0.09), new THREE.MeshBasicMaterial({color:0x4ee06a}));
+  fg.position.z = 0.002;
+  g.add(bg, fg);
+  g.userData = {fg, w};
+  return g;
+}
+
+function spawnEnemy(typeKey){
+  const T = ENEMY_TYPES[typeKey];
+  const group = T.build();
+  scene.add(group);
+  const hpBar = makeHpBar(T.bar);
+  scene.add(hpBar);
+  enemies.push({type:T, group, hpBar, t:0, hp:T.hp, alive:true, wobT:Math.random()*10});
+  if(T.boss){ showBanner('👑 디디디 대왕 등장!!', 2500); sfx(120, 60, 0.6, 'sawtooth', 0.08); }
+}
+
+function removeEnemy(e){
+  e.alive = false;
+  scene.remove(e.group);
+  scene.remove(e.hpBar);
+  const i = enemies.indexOf(e);
+  if(i >= 0) enemies.splice(i, 1);
+}
+
+function damage(e, d){
+  if(!e.alive) return;
+  e.hp -= d;
+  if(e.hp <= 0){
+    gold += e.type.reward;
+    burst(e.group.position.clone().add(v(0, 0.7, 0)), 0xfff3a0, e.type.boss ? 24 : 9);
+    sfx(420, 90, 0.18, 'square', 0.06);
+    removeEnemy(e);
+    updateUI();
+  }
+}
+
+function loseLife(n){
+  lives -= n;
+  if(lives < 0) lives = 0;
+  updateUI(); flash();
+  sfx(220, 60, 0.35, 'sawtooth', 0.07);
+  if(lives <= 0 && state === 'wave') gameOver(false);
+}
+
+/* ================= 발사체 / 파티클 ================= */
+function shoot(tw, e){
+  const m = new THREE.Mesh(starGeoSmall, projMat(tw.T.projColor));
+  m.scale.setScalar(tw.T.projScale);
+  m.position.set(tw.pos.x, 1.05, tw.pos.z);
+  scene.add(m);
+  projectiles.push({m, target:e, last:e.group.position.clone(), dmg:tw.T.dmg, speed:13});
+  tw.squash = 1;
+  sfx(tw.T.sfx[0], tw.T.sfx[1], 0.07, 'triangle', 0.035);
+}
+
+function burst(pos, color, n){
+  for(let i=0;i<n;i++){
+    const m = new THREE.Mesh(starGeoTiny, new THREE.MeshBasicMaterial({color, transparent:true}));
+    m.position.copy(pos);
+    const vel = v((Math.random()-0.5)*3.5, Math.random()*3.2+1.2, (Math.random()-0.5)*3.5);
+    particles.push({m, vel, life:0.7});
+    scene.add(m);
+  }
+}
+
+/* ================= 웨이브 진행 ================= */
+function startWave(){
+  state = 'wave';
+  wave++;
+  startBtn.classList.add('hidden');
+  spawnQueue = [];
+  let t = 0.5;
+  for(const en of WAVES[wave-1]){
+    for(let i=0;i<en.count;i++){
+      spawnQueue.push({type:en.type, time:t});
+      t += en.interval;
+    }
+  }
+  waveTime = 0;
+  showBanner(`🌊 WAVE ${wave} 시작!`);
+  sfx(523, 784, 0.25, 'triangle', 0.06);
+  updateUI();
+}
+
+function waveCleared(){
+  if(wave >= WAVES.length){ gameOver(true); return; }
+  state = 'idle';
+  gold += 50;
+  updateUI();
+  showBanner('✨ 웨이브 클리어! 보너스 ⭐50', 2200);
+  startBtn.textContent = '▶ 다음 웨이브';
+  startBtn.classList.remove('hidden');
+}
+
+function gameOver(win){
+  state = win ? 'won' : 'lost';
+  startBtn.classList.add('hidden');
+  const ov = $('overlay'), h = ov.querySelector('h1'), p = ov.querySelector('p'), b = $('overlayBtn');
+  if(win){
+    h.textContent = '🎉 승리!';
+    p.innerHTML = '디디디 대왕까지 모두 물리치고<br>팝스타의 별을 지켜냈어요! 🌟';
+    [523,659,784,1047].forEach((f,i)=>setTimeout(()=>sfx(f, f, 0.2, 'triangle', 0.07), i*150));
+  } else {
+    h.textContent = '💔 패배...';
+    p.innerHTML = '적들이 별을 빼앗아 갔어요.<br>다시 한번 도전해 볼까요?';
+  }
+  b.textContent = '다시 하기';
+  b.onclick = ()=>location.reload();
+  ov.classList.remove('hidden');
+}
+
+startBtn.addEventListener('click', ()=>{ ensureAC(); if(state==='idle') startWave(); });
+$('overlayBtn').addEventListener('click', ()=>{
+  ensureAC();
+  $('overlay').classList.add('hidden');
+  $('hint').classList.remove('hidden');
+  state = 'idle';
+  startBtn.classList.remove('hidden');
+});
+
+/* ================= 메인 루프 ================= */
+const clock = new THREE.Clock();
+
+function gameUpdate(dt){
+  // 스폰
+  waveTime += dt;
+  while(spawnQueue.length && spawnQueue[0].time <= waveTime){
+    spawnEnemy(spawnQueue.shift().type);
+  }
+  // 적 이동
+  for(let i=enemies.length-1;i>=0;i--){
+    const e = enemies[i];
+    e.t += e.type.speed * dt / curveLen;
+    if(e.t >= 1){ loseLife(e.type.dmgToBase || 1); removeEnemy(e); continue; }
+    const p = curve.getPointAt(e.t), tg = curve.getTangentAt(e.t);
+    e.wobT += dt;
+    e.group.position.set(p.x, (e.type.flyY||0) + Math.abs(Math.sin(e.wobT*7))*0.07, p.z);
+    e.group.rotation.y = Math.atan2(tg.x, tg.z);
+    e.group.rotation.z = Math.sin(e.wobT*9)*0.05;
+    if(e.group.userData.wings){
+      for(const w of e.group.userData.wings)
+        w.rotation.z = w.userData.side * (0.45 + Math.sin(e.wobT*24)*0.45);
+    }
+    e.hpBar.position.set(p.x, e.group.position.y + e.type.barY, p.z);
+    e.hpBar.quaternion.copy(camera.quaternion);
+    const r = Math.max(e.hp, 0) / e.type.hp;
+    const fg = e.hpBar.userData.fg;
+    fg.scale.x = Math.max(r, 0.001);
+    fg.position.x = -e.hpBar.userData.w * (1-r) / 2;
+    fg.material.color.setHSL(0.33*r, 0.85, 0.5);
+  }
+  // 타워
+  for(const tw of towers){
+    tw.cd -= dt;
+    let best = null;
+    for(const e of enemies){
+      if(!e.alive) continue;
+      if(tw.pos.distanceTo(e.group.position) <= tw.T.range && (!best || e.t > best.t)) best = e;
+    }
+    if(best){
+      tw.group.rotation.y = Math.atan2(best.group.position.x - tw.pos.x, best.group.position.z - tw.pos.z);
+      if(tw.cd <= 0){ tw.cd = tw.T.rate; shoot(tw, best); }
+    }
+  }
+  // 웨이브 종료 체크
+  if(state === 'wave' && !spawnQueue.length && !enemies.length) waveCleared();
+}
+
+function animate(){
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const t = clock.elapsedTime;
+
+  if(state === 'wave') gameUpdate(dt);
+
+  // 발사체 (웨이브가 끝나도 마무리)
+  for(let i=projectiles.length-1;i>=0;i--){
+    const p = projectiles[i];
+    if(p.target && p.target.alive){
+      p.last.copy(p.target.group.position);
+      p.last.y += 0.5;
+    }
+    p.m.rotation.y += 10*dt; p.m.rotation.x += 6*dt;
+    const dir = p.last.clone().sub(p.m.position);
+    const d = dir.length(), step = p.speed*dt;
+    if(d <= step + 0.3){
+      if(p.target && p.target.alive) damage(p.target, p.dmg);
+      burst(p.m.position, 0xffe066, 3);
+      scene.remove(p.m);
+      projectiles.splice(i, 1);
+    } else {
+      p.m.position.add(dir.multiplyScalar(step/d));
+    }
+  }
+  // 파티클
+  for(let i=particles.length-1;i>=0;i--){
+    const p = particles[i];
+    p.life -= dt;
+    if(p.life <= 0){ scene.remove(p.m); particles.splice(i, 1); continue; }
+    p.m.position.addScaledVector(p.vel, dt);
+    p.vel.y -= 6*dt;
+    p.m.material.opacity = p.life / 0.7;
+    p.m.rotation.z += 8*dt;
+  }
+  // 타워 발사 애니메이션
+  for(const tw of towers){
+    if(tw.squash > 0){
+      tw.squash = Math.max(0, tw.squash - 4*dt);
+      const s = Math.sin(tw.squash * Math.PI) * 0.14;
+      tw.group.scale.set(1+s, 1-s, 1+s);
+    }
+  }
+  // 장식
+  goalStar.rotation.y += dt * 1.2;
+  goalStar.position.y = 1.5 + Math.sin(t*2)*0.12;
+  for(const c of clouds){
+    c.position.x += dt * 0.4;
+    if(c.position.x > 25) c.position.x = -25;
+  }
+  renderer.render(scene, camera);
+}
+
+window.addEventListener('resize', ()=>{
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  fitCamera();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+updateUI();
+animate();
+</script>
+</body>
+</html>
