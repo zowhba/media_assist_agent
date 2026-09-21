@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="ko">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>AM Client 사용 신청 - MAP</title><link rel="stylesheet" href="/static/style.css"></head>
+<body><div id="app-shell"></div><main>
+<div class="card"><h2>🔐 AM Client 사용 신청</h2><p>신청일(한국 시간)부터 같은 주 금요일까지 BTVVPN·TESTBED 초안 2건을 만들고 각각 확인·등록합니다.</p><p class="muted">유형: AM Client사용 신청서 · 우선순위: 낮음 · 담당자: 자동</p><p>BTVVPN: ojw / 오지웅, 2200146 / 이지영, runa0477 / 이윤주<br>TESTBED: ojw / 오지웅<br>접속지: 58.234.3.132 · 사무실 업무 PC</p><button id="preview" disabled>신청 내용 미리보기</button></div>
+<details class="card" id="settings"><summary class="settings-summary">⚙️ 설명 기본값 설정</summary><div class="settings-body"><p>계정별로 저장됩니다. <code>{table}</code> 위치에 고정 대상과 이번 신청 기간을 넣습니다. <code>{start_date}</code>, <code>{end_date}</code>도 사용할 수 있습니다.</p><label for="btv">BTVVPN 설명</label><textarea id="btv" rows="8"></textarea><label for="testbed">TESTBED 설명</label><textarea id="testbed" rows="10"></textarea><button id="save" disabled>기본값 저장</button><p id="settings-status" role="status"></p></div></details>
+<div class="card" id="preview-card" hidden><h2 id="period"></h2><div id="issues"></div></div>
+<div class="card" id="status" role="status" aria-live="polite">설정을 불러오는 중입니다.</div>
+</main><script src="/static/auth.js"></script><script>renderShell({context:{icon:"🔐",title:"AM Client 사용 신청",actions:[{label:"Jira 연결 설정",href:"/settings"}]}});</script><script src="/static/am-client.js"></script></body></html>

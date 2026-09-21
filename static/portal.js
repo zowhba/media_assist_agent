@@ -30,6 +30,15 @@ const TOOLS = [
     settingsHref: "/tools/monthly",
   },
   {
+    id: "am-client",
+    icon: "🔐",
+    title: "AM Client 사용 신청",
+    desc: "BTVVPN·TESTBED 신청 2건을 오늘부터 이번 주 금요일까지 일정으로 등록합니다.",
+    href: "/tools/am-client",
+    status: "active",
+    settingsHref: "/tools/am-client#settings",
+  },
+  {
     id: "meeting",
     icon: "🗒️",
     title: "회의록 요약",

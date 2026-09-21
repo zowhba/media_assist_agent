@@ -1230,6 +1230,11 @@ async def api_monthly_generate(
     }
 
 
+
+# Fourth portal tool: AM Client access requests.
+import am_client
+am_client.install(app, require_user, _user_group_settings, _serve, JIRA_TOKEN)
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("app:app", host="127.0.0.1", port=8765, reload=True)
