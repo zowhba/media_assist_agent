@@ -98,6 +98,12 @@ def _parse_html(html: str) -> List[Dict[str, Any]]:
             cells.setdefault(cls, cm.group(2))
 
         key = _clean_text(cells.get("issuekey", ""))
+        if not key:
+            # issuekey 컬럼이 없을 때: <tr data-issuekey="..."> 또는 data-issue-key 링크에서 추출
+            km = (re.search(r'\bdata-issuekey="([^"]+)"', rm.group(0), re.I)
+                  or re.search(r'\bdata-issue-key="([^"]+)"', row_html, re.I))
+            if km:
+                key = _clean_text(km.group(1))
         summary = _clean_text(cells.get("summary", ""))
         if not key and not summary:
             continue
@@ -137,7 +143,7 @@ def _to_seconds(value: Any) -> int:
 
 # CSV 헤더 별칭
 _CSV_ALIASES = {
-    "key": ["키", "issue key", "issuekey", "key"],
+    "key": ["키", "이슈 키", "이슈키", "issue key", "issuekey", "issue_key", "key"],
     "summary": ["요약", "summary"],
     "status": ["상태", "status"],
     "assignee": ["담당자", "assignee"],
